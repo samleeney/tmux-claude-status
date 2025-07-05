@@ -10,8 +10,8 @@ tmux_option_key="@claude-status-key"
 key=$(tmux show-option -gqv "$tmux_option_key")
 [ -z "$key" ] && key="$default_key"
 
-# Set up custom session switcher with Claude status
-tmux bind-key "$key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/simple-session-switcher.sh"
+# Set up custom session switcher with Claude status (hook-based)
+tmux bind-key "$key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
 
 # Optional: Start background status monitor (commented out for now)
 # pkill -f "status-monitor.*\.sh" 2>/dev/null

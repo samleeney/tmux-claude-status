@@ -38,7 +38,7 @@ Add to your `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "/home/sam/.config/tmux/plugins/tmux-claude-status/hooks/better-hook.sh PreToolUse"
+            "command": "~/.config/tmux/plugins/tmux-claude-status/hooks/better-hook.sh PreToolUse"
           }
         ]
       }
@@ -48,7 +48,7 @@ Add to your `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command", 
-            "command": "/home/sam/.config/tmux/plugins/tmux-claude-status/hooks/better-hook.sh Stop"
+            "command": "~/.config/tmux/plugins/tmux-claude-status/hooks/better-hook.sh Stop"
           }
         ]
       }
@@ -56,8 +56,6 @@ Add to your `~/.claude/settings.json`:
   }
 }
 ```
-
-Replace `/home/sam/.config/tmux` with your actual tmux config path.
 
 ## Usage
 

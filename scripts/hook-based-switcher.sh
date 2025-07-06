@@ -4,24 +4,18 @@
 
 STATUS_DIR="$HOME/.cache/tmux-claude-status"
 
-# Function to check if Claude is in a session by status file or process
+# Function to check if Claude is in a session (actually running, not just has status file)
 has_claude_in_session() {
     local session="$1"
-    local status_file="$STATUS_DIR/${session}.status"
     
-    # If status file exists, we have Claude (hooks are active)
-    if [ -f "$status_file" ]; then
-        return 0  # Found Claude via hooks
-    fi
-    
-    # Fallback: Check all panes in the session for claude processes
+    # Check all panes in the session for claude processes
     while IFS=: read -r pane_id pane_pid; do
         if pgrep -P "$pane_pid" -f "claude" >/dev/null 2>&1; then
-            return 0  # Found Claude via process
+            return 0  # Found Claude process
         fi
     done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
     
-    return 1  # No Claude
+    return 1  # No Claude process found
 }
 
 # Function to get Claude status from hook files

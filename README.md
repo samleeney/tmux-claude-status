@@ -12,6 +12,8 @@ See Claude AI activity across all tmux sessions at a glance.
 - **Live Preview** - See session content while browsing
 - **Vim Navigation** - Use `j/k` to navigate
 - **SSH Support** - Detects Claude status in SSH sessions via remote status files
+- **Status Bar Integration** - Shows Claude status in tmux status bar
+- **Notification Sound** - Plays a sound when Claude finishes processing
 
 ## Install
 
@@ -61,6 +63,14 @@ Add to your `~/.claude/settings.json`:
 ## Usage
 
 Press `prefix + s` to open the enhanced session switcher.
+
+### Status Bar
+
+The plugin automatically adds Claude status to your tmux status bar:
+- `✓ All Claudes ready` - All Claude instances are idle
+- `⚡ N Claude(s) working` - Shows number of Claude instances currently processing
+
+A notification sound plays when any Claude finishes processing.
 
 ## How It Works
 

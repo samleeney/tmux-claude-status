@@ -13,6 +13,11 @@ key=$(tmux show-option -gqv "$tmux_option_key")
 # Set up custom session switcher with Claude status (hook-based)
 tmux bind-key "$key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
 
-# Optional: Start background status monitor (commented out for now)
-# pkill -f "status-monitor.*\.sh" 2>/dev/null
-# "$CURRENT_DIR/scripts/status-monitor-v2.sh" > /dev/null 2>&1 &
+# Set up tmux status line integration
+tmux set-option -g status-interval 1
+
+# Check if our status is already in the status-right
+current_status_right=$(tmux show-option -gqv status-right)
+if ! echo "$current_status_right" | grep -q "status-line.sh"; then
+    tmux set-option -ag status-right " #($CURRENT_DIR/scripts/status-line.sh)"
+fi

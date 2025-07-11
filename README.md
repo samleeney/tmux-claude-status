@@ -11,6 +11,7 @@ See Claude AI activity across all tmux sessions at a glance.
 - **Smart Grouping** - Sessions organized by Claude status
 - **Live Preview** - See session content while browsing
 - **Vim Navigation** - Use `j/k` to navigate
+- **SSH Support** - Detects Claude status in SSH sessions via remote status files
 
 ## Install
 
@@ -68,6 +69,32 @@ The plugin uses [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-co
 - `Stop` - Sets status to "done" when Claude finishes processing
 
 Status files are stored in `~/.cache/tmux-claude-status/{session_name}.status`
+
+### SSH Sessions
+
+To set up Claude status tracking for SSH servers, run the setup script once per server:
+
+```bash
+./setup-server.sh <session-name> <ssh-host>
+```
+
+**Example:**
+```bash
+./setup-server.sh reachgpu reachgpu
+```
+
+This single script:
+- Maps the remote hostname to your session name
+- Copies the hook to the remote server
+- Sets up Claude hooks on the remote machine
+
+After setup, use standard SSH commands:
+```bash
+ssh reachgpu
+claude  # Status will show in your local session switcher
+```
+
+SSH sessions display as: `session-name [🌐 ssh] [⚡ working]`
 
 ## License
 

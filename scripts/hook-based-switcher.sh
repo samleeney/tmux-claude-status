@@ -18,13 +18,47 @@ has_claude_in_session() {
     return 1  # No Claude process found
 }
 
+# Function to check if session is SSH by examining panes
+is_ssh_session() {
+    local session="$1"
+    # Check if any pane in the session is running SSH
+    if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
+        return 0
+    fi
+    # Simple fallback: check if session name matches known SSH hosts
+    case "$session" in
+        reachgpu) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+
+# Function to get SSH host for session
+get_ssh_host() {
+    local session="$1"
+    # For now, if it's an SSH session, assume the session name is the host
+    # This is simple and works for most cases where session names match SSH config
+    if is_ssh_session "$session"; then
+        echo "$session"
+    fi
+}
+
 # Function to get Claude status from hook files
 get_claude_status() {
     local session="$1"
-    local status_file="$STATUS_DIR/${session}.status"
     
+    if [ "$session" = "reachgpu" ]; then
+        # Use smart monitor cache
+        local cached_status="$STATUS_DIR/reachgpu-remote.status"
+        if [ -f "$cached_status" ]; then
+            cat "$cached_status" 2>/dev/null
+            return
+        fi
+    fi
+    
+    # Check local status files
+    local status_file="$STATUS_DIR/${session}.status"
     if [ -f "$status_file" ]; then
-        # Read status from file (should be "working" or "done")
         cat "$status_file" 2>/dev/null || echo ""
     else
         echo ""
@@ -41,26 +75,51 @@ get_sessions_with_status() {
     while IFS=: read -r name windows attached; do
         local formatted_line=""
         
-        # First check if Claude is present
+        # Check if it's an SSH session
+        local ssh_indicator=""
+        if is_ssh_session "$name"; then
+            ssh_indicator="[🌐 ssh]"
+        fi
+        
+        # Check if Claude is present (local) or if we have remote status (SSH)
+        local claude_status=$(get_claude_status "$name")
+        local has_claude=false
+        
         if has_claude_in_session "$name"; then
-            # Get status from hook file
-            local claude_status=$(get_claude_status "$name")
-            
+            has_claude=true
+        elif [ -n "$claude_status" ]; then
+            # SSH session with remote status
+            has_claude=true
+        fi
+        
+        if [ "$has_claude" = true ]; then
             # Default to "done" if no status file exists
             [ -z "$claude_status" ] && claude_status="done"
             
             if [ "$claude_status" = "working" ]; then
-                formatted_line=$(printf "%-20s %2s windows %-12s \033[33m[⚡ working]\033[0m" "$name" "$windows" "$attached")
+                if [ -n "$ssh_indicator" ]; then
+                    formatted_line=$(printf "%-20s %2s windows %-12s %s [⚡ working]" "$name" "$windows" "$attached" "$ssh_indicator")
+                else
+                    formatted_line=$(printf "%-20s %2s windows %-12s [⚡ working]" "$name" "$windows" "$attached")
+                fi
                 working_sessions+=("$formatted_line")
             else
-                formatted_line=$(printf "%-20s %2s windows %-12s \033[32m[✓ done]\033[0m" "$name" "$windows" "$attached")
+                if [ -n "$ssh_indicator" ]; then
+                    formatted_line=$(printf "%-20s %2s windows %-12s %s [✓ done]" "$name" "$windows" "$attached" "$ssh_indicator")
+                else
+                    formatted_line=$(printf "%-20s %2s windows %-12s [✓ done]" "$name" "$windows" "$attached")
+                fi
                 done_sessions+=("$formatted_line")
             fi
         else
-            formatted_line=$(printf "%-20s %2s windows %-12s" "$name" "$windows" "$attached")
+            if [ -n "$ssh_indicator" ]; then
+                formatted_line=$(printf "%-20s %2s windows %-12s %s" "$name" "$windows" "$attached" "$ssh_indicator")
+            else
+                formatted_line=$(printf "%-20s %2s windows %-12s" "$name" "$windows" "$attached")
+            fi
             no_claude_sessions+=("$formatted_line")
         fi
-    done < <(tmux list-sessions -F "#{session_name}:#{session_windows}:#{?session_attached,(attached),}")
+    done < <(tmux list-sessions -F "#{session_name}:#{session_windows}:#{?session_attached,(attached),}" 2>/dev/null || echo "")
     
     # Output grouped sessions with separators
     
@@ -85,18 +144,31 @@ get_sessions_with_status() {
     fi
 }
 
+# Handle --no-fzf flag for daemon refresh
+if [ "$1" = "--no-fzf" ]; then
+    get_sessions_with_status
+    exit 0
+fi
+
 # Main
 sessions=$(get_sessions_with_status)
 
-# Use fzf to select with vim keybindings
-selected=$(echo "$sessions" | fzf \
+# Start smart monitor (will auto-stop when no SSH sessions)
+MONITOR_SCRIPT="$(dirname "$0")/../smart-monitor.sh"
+if [ -f "$MONITOR_SCRIPT" ]; then
+    "$MONITOR_SCRIPT" start >/dev/null 2>&1
+fi
+
+# Use fzf with manual refresh (Ctrl-R)
+selected=$(get_sessions_with_status | fzf \
     --ansi \
     --no-sort \
-    --header="Sessions grouped by Claude status | j/k: navigate | Enter: select | Esc: cancel" \
+    --header="Sessions grouped by Claude status | j/k: navigate | Enter: select | Esc: cancel | Ctrl-R: refresh" \
     --preview 'if echo {} | grep -q "━━━"; then echo "Category separator"; else session=$(echo {} | awk "{print \$1}"); tmux capture-pane -ep -t "$session" 2>/dev/null || echo "No preview available"; fi' \
     --preview-window=right:40%:wrap \
     --prompt="Session> " \
     --bind="j:down,k:up,ctrl-j:preview-down,ctrl-k:preview-up" \
+    --bind="ctrl-r:reload(bash '$0' --no-fzf)" \
     --layout=reverse \
     --info=inline)
 

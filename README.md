@@ -2,7 +2,7 @@
 
 See Claude AI activity across all tmux sessions at a glance.
 
-![tmux-claude-status screenshot](screenshot.png)
+![tmux-claude-status screenshot](claude-working-done.png)
 
 ## Features
 

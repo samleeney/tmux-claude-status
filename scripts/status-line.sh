@@ -85,10 +85,13 @@ fi
 if [ "$total" -eq 0 ]; then
     # No Claude sessions
     echo ""
-elif [ "$working" -eq 0 ]; then
+elif [ "$working" -eq 0 ] && [ "$done" -gt 0 ]; then
     # All Claudes are done
     echo "#[fg=green,bold]✓ All Claudes ready#[default]"
-else
-    # Some Claudes are working
-    echo "#[fg=yellow,bold]⚡ $working Claude$([ $working -eq 1 ] || echo 's') working#[default]"
+elif [ "$working" -gt 0 ] && [ "$done" -gt 0 ]; then
+    # Some working, some done
+    echo "#[fg=yellow,bold]⚡ $working working#[default] #[fg=green]✓ $done done#[default]"
+elif [ "$working" -gt 0 ]; then
+    # All Claudes are working
+    echo "#[fg=yellow,bold]⚡ All $working Claude$([ $working -eq 1 ] || echo 's') working#[default]"
 fi

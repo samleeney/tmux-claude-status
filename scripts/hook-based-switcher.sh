@@ -159,8 +159,11 @@ if [ -f "$MONITOR_SCRIPT" ]; then
     "$MONITOR_SCRIPT" start >/dev/null 2>&1
 fi
 
+# Add the reminder at the bottom of the session list
+sessions_with_reminder=$(echo -e "$(get_sessions_with_status)\n\n\033[1;36m━━━ Hit Ctrl-R if something doesn't look right! ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
+
 # Use fzf with manual refresh (Ctrl-R)
-selected=$(get_sessions_with_status | fzf \
+selected=$(echo "$sessions_with_reminder" | fzf \
     --ansi \
     --no-sort \
     --header="Sessions grouped by Claude status | j/k: navigate | Enter: select | Esc: cancel | Ctrl-R: refresh" \

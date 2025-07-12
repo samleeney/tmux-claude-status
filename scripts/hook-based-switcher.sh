@@ -113,9 +113,9 @@ get_sessions_with_status() {
             fi
         else
             if [ -n "$ssh_indicator" ]; then
-                formatted_line=$(printf "%-20s %2s windows %-12s %s" "$name" "$windows" "$attached" "$ssh_indicator")
+                formatted_line=$(printf "%-20s %2s windows %-12s %s [no claude]" "$name" "$windows" "$attached" "$ssh_indicator")
             else
-                formatted_line=$(printf "%-20s %2s windows %-12s" "$name" "$windows" "$attached")
+                formatted_line=$(printf "%-20s %2s windows %-12s [no claude]" "$name" "$windows" "$attached")
             fi
             no_claude_sessions+=("$formatted_line")
         fi

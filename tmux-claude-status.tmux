@@ -13,6 +13,9 @@ key=$(tmux show-option -gqv "$tmux_option_key")
 # Set up custom session switcher with Claude status (hook-based)
 tmux bind-key "$key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
 
+# Set up keybinding to switch to next done project (prefix + n)
+tmux bind-key "n" run-shell "$CURRENT_DIR/scripts/next-done-project.sh"
+
 # Set up tmux status line integration
 tmux set-option -g status-interval 1
 

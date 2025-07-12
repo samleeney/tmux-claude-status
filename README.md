@@ -73,6 +73,7 @@ Add to your `~/.claude/settings.json`:
 ## Usage
 
 Press `prefix + s` to open the enhanced session switcher.
+Press `prefix + n` to switch to the next 'done' project.
 
 ### Status Bar
 

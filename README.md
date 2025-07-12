@@ -55,6 +55,16 @@ Add to your `~/.claude/settings.json`:
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-claude-status/hooks/better-hook.sh Notification"
+          }
+        ]
+      }
     ]
   }
 }
@@ -77,6 +87,7 @@ A notification sound plays when any Claude finishes processing.
 The plugin uses [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to track status:
 - `PreToolUse` - Sets status to "working" when Claude starts running tools
 - `Stop` - Sets status to "done" when Claude finishes processing
+- `Notification` - Sets status to "done" when Claude is waiting for user input (questions, permissions, etc.)
 
 Status files are stored in `~/.cache/tmux-claude-status/{session_name}.status`
 

@@ -38,12 +38,16 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}.status"
         
         case "$HOOK_TYPE" in
-            "PreToolUse"|"Notification")
+            "PreToolUse")
                 # Claude is starting to work
                 echo "working" > "$STATUS_FILE"
                 ;;
             "Stop"|"SubagentStop")
                 # Claude has finished responding
+                echo "done" > "$STATUS_FILE"
+                ;;
+            "Notification")
+                # Claude is waiting for user input (questions, permissions, plan approval)
                 echo "done" > "$STATUS_FILE"
                 ;;
         esac

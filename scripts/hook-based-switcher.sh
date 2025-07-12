@@ -47,13 +47,11 @@ get_ssh_host() {
 get_claude_status() {
     local session="$1"
     
-    if [ "$session" = "reachgpu" ]; then
-        # Use smart monitor cache
-        local cached_status="$STATUS_DIR/reachgpu-remote.status"
-        if [ -f "$cached_status" ]; then
-            cat "$cached_status" 2>/dev/null
-            return
-        fi
+    # Check for remote status file first (for SSH sessions)
+    local remote_status="$STATUS_DIR/${session}-remote.status"
+    if [ -f "$remote_status" ]; then
+        cat "$remote_status" 2>/dev/null
+        return
     fi
     
     # Check local status files

@@ -27,9 +27,18 @@ should_run() {
 # Function to update SSH session status
 update_ssh_status() {
     # Update reachgpu status
-    ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
-        reachgpu "cat ~/.cache/tmux-claude-status/reachgpu.status" 2>/dev/null \
-        > "$STATUS_DIR/reachgpu-remote.status" 2>/dev/null || echo "" > "$STATUS_DIR/reachgpu-remote.status"
+    if tmux has-session -t reachgpu 2>/dev/null; then
+        ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
+            reachgpu "cat ~/.cache/tmux-claude-status/reachgpu.status" 2>/dev/null \
+            > "$STATUS_DIR/reachgpu-remote.status" 2>/dev/null || echo "" > "$STATUS_DIR/reachgpu-remote.status"
+    fi
+    
+    # Update tig status
+    if tmux has-session -t tig 2>/dev/null; then
+        ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET             nga100 "cat ~/.cache/tmux-claude-status/tig.status" 2>/dev/null             > "$STATUS_DIR/tig-remote.status" 2>/dev/null || echo "" > "$STATUS_DIR/tig-remote.status"
+    fi
+    
+    # ADD_SSH_SESSIONS_HERE
 }
 
 # Function to start monitoring

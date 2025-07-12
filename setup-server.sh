@@ -77,6 +77,29 @@ CLAUDE_SETTINGS='{
 
 ssh "$SSH_HOST" "echo '$CLAUDE_SETTINGS' > ~/.claude/settings.json"
 
+# 6. Add SSH session monitoring to smart-monitor.sh
+echo "Adding SSH session to local monitoring..."
+MONITOR_SCRIPT="$SCRIPT_DIR/smart-monitor.sh"
+if [ -f "$MONITOR_SCRIPT" ]; then
+    # Check if session already exists in monitor
+    if ! grep -q "tmux has-session -t $SESSION_NAME" "$MONITOR_SCRIPT"; then
+        # Add new session monitoring before the marker comment
+        MONITOR_CODE="    # Update $SESSION_NAME status
+    if tmux has-session -t $SESSION_NAME 2>/dev/null; then
+        ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \\
+            $SSH_HOST \"cat ~/.cache/tmux-claude-status/${SESSION_NAME}.status\" 2>/dev/null \\
+            > \"\$STATUS_DIR/${SESSION_NAME}-remote.status\" 2>/dev/null || echo \"\" > \"\$STATUS_DIR/${SESSION_NAME}-remote.status\"
+    fi
+    "
+        # Insert before the ADD_SSH_SESSIONS_HERE marker
+        awk -v code="$MONITOR_CODE" '/# ADD_SSH_SESSIONS_HERE/ {print code} {print}' "$MONITOR_SCRIPT" > "$MONITOR_SCRIPT.tmp" && mv "$MONITOR_SCRIPT.tmp" "$MONITOR_SCRIPT"
+        chmod +x "$MONITOR_SCRIPT"
+        echo "✓ Added $SESSION_NAME monitoring to smart-monitor.sh"
+    else
+        echo "✓ Session monitoring already exists"
+    fi
+fi
+
 echo ""
 echo "🎉 Setup complete!"
 echo "Now when you run: ssh $SSH_HOST"

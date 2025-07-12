@@ -22,6 +22,7 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
             # Check if we're on known servers and map to likely session names
             case $(hostname -s) in
                 instance-*) TMUX_SESSION="reachgpu" ;;  # Your GPU server
+                persistent-faraday) TMUX_SESSION="tig" ;;
                 instance-20250620-122051) TMUX_SESSION="reachgpu" ;;
                 *) TMUX_SESSION=$(hostname -s) ;;       # Default to hostname
             esac

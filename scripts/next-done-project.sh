@@ -68,7 +68,7 @@ while IFS=: read -r name windows attached; do
     if [ "$has_claude" = true ]; then
         [ -z "$claude_status" ] && claude_status="done"
         
-        if [ "$claude_status" != "working" ]; then
+        if [ "$claude_status" = "done" ]; then
             done_sessions+=("$name")
         fi
     fi

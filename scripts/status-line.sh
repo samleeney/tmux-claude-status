@@ -93,5 +93,9 @@ elif [ "$working" -gt 0 ] && [ "$done" -gt 0 ]; then
     echo "#[fg=yellow,bold]⚡ $working working#[default] #[fg=green]✓ $done done#[default]"
 elif [ "$working" -gt 0 ]; then
     # All Claudes are working
-    echo "#[fg=yellow,bold]⚡ All $working Claude$([ $working -eq 1 ] || echo 's') working#[default]"
+    if [ "$working" -eq 1 ]; then
+        echo "#[fg=yellow,bold]⚡ Claude is working#[default]"
+    else
+        echo "#[fg=yellow,bold]⚡ $working Claudes are working#[default]"
+    fi
 fi

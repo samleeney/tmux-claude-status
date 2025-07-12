@@ -56,8 +56,8 @@ current_session=$(tmux display-message -p "#{session_name}")
 done_sessions=()
 while IFS=: read -r name windows attached; do
     # Check if Claude is present
-    local claude_status=$(get_claude_status "$name")
-    local has_claude=false
+    claude_status=$(get_claude_status "$name")
+    has_claude=false
     
     if has_claude_in_session "$name"; then
         has_claude=true

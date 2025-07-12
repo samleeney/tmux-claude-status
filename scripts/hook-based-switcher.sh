@@ -87,9 +87,14 @@ get_sessions_with_status() {
         
         if has_claude_in_session "$name"; then
             has_claude=true
-        elif [ -n "$claude_status" ]; then
+        elif [ -n "$claude_status" ] && is_ssh_session "$name"; then
             # SSH session with remote status
             has_claude=true
+        else
+            # Clean up stale status file if Claude is not running
+            if [ -n "$claude_status" ] && ! is_ssh_session "$name"; then
+                rm -f "$STATUS_DIR/${name}.status" 2>/dev/null
+            fi
         fi
         
         if [ "$has_claude" = true ]; then

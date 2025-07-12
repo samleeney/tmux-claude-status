@@ -42,7 +42,7 @@ start_monitor() {
     (
         while should_run; do
             update_ssh_status
-            sleep 5
+            sleep 1
         done
         # Clean up when done
         rm -f "$DAEMON_PID_FILE"

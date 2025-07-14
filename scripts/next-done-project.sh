@@ -33,14 +33,14 @@ is_ssh_session() {
 get_claude_status() {
     local session="$1"
     
-    if [ "$session" = "reachgpu" ]; then
-        local cached_status="$STATUS_DIR/reachgpu-remote.status"
-        if [ -f "$cached_status" ]; then
-            cat "$cached_status" 2>/dev/null
-            return
-        fi
+    # Check for remote status file first (for SSH sessions)
+    local remote_status="$STATUS_DIR/${session}-remote.status"
+    if [ -f "$remote_status" ]; then
+        cat "$remote_status" 2>/dev/null
+        return
     fi
     
+    # Check local status files
     local status_file="$STATUS_DIR/${session}.status"
     if [ -f "$status_file" ]; then
         cat "$status_file" 2>/dev/null || echo ""
@@ -61,7 +61,8 @@ while IFS=: read -r name windows attached; do
     
     if has_claude_in_session "$name"; then
         has_claude=true
-    elif [ -n "$claude_status" ]; then
+    elif [ -n "$claude_status" ] && is_ssh_session "$name"; then
+        # SSH session with remote status
         has_claude=true
     fi
     

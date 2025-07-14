@@ -65,7 +65,7 @@ play_notification() {
 }
 
 # Get current status
-IFS=':' read -r working done total <<< "$(count_claude_status)"
+IFS=':' read -r working done total_claude <<< "$(count_claude_status)"
 
 # Load previous status
 prev_working=0

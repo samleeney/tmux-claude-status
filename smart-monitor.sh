@@ -80,8 +80,8 @@ update_ssh_status() {
             if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/reachgpu.wait" ]; then
                 rm -f "$STATUS_DIR/wait/reachgpu.wait"
             fi
-            # Don't overwrite local wait status unless remote is working/done
-            if [ ! -f "$STATUS_DIR/wait/reachgpu.wait" ] || [ "$remote_status" = "working" ] || [ "$remote_status" = "done" ]; then
+            # Don't overwrite local wait status at all
+            if [ ! -f "$STATUS_DIR/wait/reachgpu.wait" ]; then
                 mv "$temp_file" "$STATUS_DIR/reachgpu-remote.status"
             else
                 rm -f "$temp_file"
@@ -102,8 +102,8 @@ update_ssh_status() {
             if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/tig.wait" ]; then
                 rm -f "$STATUS_DIR/wait/tig.wait"
             fi
-            # Don't overwrite local wait status unless remote is working/done
-            if [ ! -f "$STATUS_DIR/wait/tig.wait" ] || [ "$remote_status" = "working" ] || [ "$remote_status" = "done" ]; then
+            # Don't overwrite local wait status at all
+            if [ ! -f "$STATUS_DIR/wait/tig.wait" ]; then
                 mv "$temp_file" "$STATUS_DIR/tig-remote.status"
             else
                 rm -f "$temp_file"
@@ -124,8 +124,8 @@ update_ssh_status() {
             if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/l4-workstation.wait" ]; then
                 rm -f "$STATUS_DIR/wait/l4-workstation.wait"
             fi
-            # Don't overwrite local wait status unless remote is working/done
-            if [ ! -f "$STATUS_DIR/wait/l4-workstation.wait" ] || [ "$remote_status" = "working" ] || [ "$remote_status" = "done" ]; then
+            # Don't overwrite local wait status at all
+            if [ ! -f "$STATUS_DIR/wait/l4-workstation.wait" ]; then
                 mv "$temp_file" "$STATUS_DIR/l4-workstation-remote.status"
             else
                 rm -f "$temp_file"

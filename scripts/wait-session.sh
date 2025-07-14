@@ -4,7 +4,7 @@
 
 STATUS_DIR="$HOME/.cache/tmux-claude-status"
 WAIT_DIR="$STATUS_DIR/wait"
-mkdir -p "$WAIT_DIR"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Get current session
 current_session=$(tmux display-message -p "#{session_name}")
@@ -32,58 +32,15 @@ is_ssh_session() {
     esac
 }
 
-# Check if session has Claude
+# Check if session has Claude or is SSH session
 if ! has_claude_in_session "$current_session" && ! is_ssh_session "$current_session"; then
-    tmux display-message "Session $current_session has no Claude running"
-    exit 1
-fi
-
-# Prompt for wait time
-tmux command-prompt -p "Wait time in minutes:" "run-shell 'echo %1 > $WAIT_DIR/$current_session.wait_time'"
-
-# Wait for the input to be processed
-sleep 0.5
-
-# Check if wait time was provided
-if [ ! -f "$WAIT_DIR/$current_session.wait_time" ]; then
-    tmux display-message "Wait cancelled"
-    exit 0
-fi
-
-wait_minutes=$(cat "$WAIT_DIR/$current_session.wait_time" 2>/dev/null)
-rm -f "$WAIT_DIR/$current_session.wait_time"
-
-# Validate input
-if ! [[ "$wait_minutes" =~ ^[0-9]+$ ]] || [ "$wait_minutes" -eq 0 ]; then
-    tmux display-message "Invalid wait time: $wait_minutes"
-    exit 1
-fi
-
-# Calculate expiry time
-expiry_time=$(($(date +%s) + (wait_minutes * 60)))
-
-# Create wait file with expiry time
-echo "$expiry_time" > "$WAIT_DIR/$current_session.wait"
-
-# Set session status to wait
-if is_ssh_session "$current_session"; then
-    echo "wait" > "$STATUS_DIR/${current_session}-remote.status"
-else
-    echo "wait" > "$STATUS_DIR/${current_session}.status"
-fi
-
-tmux display-message "Session $current_session will wait for $wait_minutes minutes"
-
-# Switch to next done session or show completion message
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NEXT_DONE_SCRIPT="$SCRIPT_DIR/next-done-project.sh"
-
-if [ -f "$NEXT_DONE_SCRIPT" ]; then
-    # Try to switch to next done session (excluding current session)
-    if ! bash "$NEXT_DONE_SCRIPT" "$current_session" 2>/dev/null; then
-        # No done sessions available
-        tmux display-message "✓ All done! No more sessions to work on."
+    # Also check if session has a status file (might be from a finished Claude)
+    if [ ! -f "$STATUS_DIR/${current_session}.status" ] && [ ! -f "$STATUS_DIR/${current_session}-remote.status" ]; then
+        tmux display-message "Session $current_session has no Claude running"
+        exit 1
     fi
-else
-    tmux display-message "Wait mode activated"
 fi
+
+# Prompt for wait time using command-prompt
+# This will call our handler script with the session name and wait time
+tmux command-prompt -p "Wait time in minutes:" "run-shell '$SCRIPT_DIR/wait-session-handler.sh \"$current_session\" %1'"

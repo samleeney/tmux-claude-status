@@ -143,9 +143,15 @@ update_ssh_status() {
 
 # Function to start monitoring
 start_monitor() {
-    if [ -f "$DAEMON_PID_FILE" ] && kill -0 "$(cat "$DAEMON_PID_FILE" 2>/dev/null)" 2>/dev/null; then
-        # Already running
-        return 0
+    if [ -f "$DAEMON_PID_FILE" ]; then
+        local old_pid=$(cat "$DAEMON_PID_FILE" 2>/dev/null)
+        if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+            # Already running
+            return 0
+        else
+            # Remove stale PID file
+            rm -f "$DAEMON_PID_FILE"
+        fi
     fi
     
     (

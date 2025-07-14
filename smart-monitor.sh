@@ -71,37 +71,46 @@ should_run() {
 update_ssh_status() {
     # Update reachgpu status
     if tmux has-session -t reachgpu 2>/dev/null; then
-        local temp_file="$STATUS_DIR/.reachgpu-remote.status.tmp"
-        if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
-            reachgpu "cat ~/.cache/tmux-claude-status/reachgpu.status 2>/dev/null || echo ''" \
-            > "$temp_file" 2>/dev/null; then
-            mv "$temp_file" "$STATUS_DIR/reachgpu-remote.status"
-        else
-            rm -f "$temp_file"
+        # Don't overwrite if session is in wait mode
+        if [ ! -f "$STATUS_DIR/wait/reachgpu.wait" ]; then
+            local temp_file="$STATUS_DIR/.reachgpu-remote.status.tmp"
+            if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
+                reachgpu "cat ~/.cache/tmux-claude-status/reachgpu.status 2>/dev/null || echo ''" \
+                > "$temp_file" 2>/dev/null; then
+                mv "$temp_file" "$STATUS_DIR/reachgpu-remote.status"
+            else
+                rm -f "$temp_file"
+            fi
         fi
     fi
     
     # Update tig status
     if tmux has-session -t tig 2>/dev/null; then
-        local temp_file="$STATUS_DIR/.tig-remote.status.tmp"
-        if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
-            nga100 "cat ~/.cache/tmux-claude-status/tig.status 2>/dev/null || echo ''" \
-            > "$temp_file" 2>/dev/null; then
-            mv "$temp_file" "$STATUS_DIR/tig-remote.status"
-        else
-            rm -f "$temp_file"
+        # Don't overwrite if session is in wait mode
+        if [ ! -f "$STATUS_DIR/wait/tig.wait" ]; then
+            local temp_file="$STATUS_DIR/.tig-remote.status.tmp"
+            if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
+                nga100 "cat ~/.cache/tmux-claude-status/tig.status 2>/dev/null || echo ''" \
+                > "$temp_file" 2>/dev/null; then
+                mv "$temp_file" "$STATUS_DIR/tig-remote.status"
+            else
+                rm -f "$temp_file"
+            fi
         fi
     fi
     
     # Update l4-workstation status
     if tmux has-session -t l4-workstation 2>/dev/null; then
-        local temp_file="$STATUS_DIR/.l4-workstation-remote.status.tmp"
-        if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
-            l4-workstation "cat ~/.cache/tmux-claude-status/l4-workstation.status 2>/dev/null || echo ''" \
-            > "$temp_file" 2>/dev/null; then
-            mv "$temp_file" "$STATUS_DIR/l4-workstation-remote.status"
-        else
-            rm -f "$temp_file"
+        # Don't overwrite if session is in wait mode
+        if [ ! -f "$STATUS_DIR/wait/l4-workstation.wait" ]; then
+            local temp_file="$STATUS_DIR/.l4-workstation-remote.status.tmp"
+            if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
+                l4-workstation "cat ~/.cache/tmux-claude-status/l4-workstation.status 2>/dev/null || echo ''" \
+                > "$temp_file" 2>/dev/null; then
+                mv "$temp_file" "$STATUS_DIR/l4-workstation-remote.status"
+            else
+                rm -f "$temp_file"
+            fi
         fi
     fi
     

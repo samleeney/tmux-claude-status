@@ -98,8 +98,24 @@ if [ ${#done_sessions[@]} -eq 0 ]; then
     exit 0
 fi
 
-# Always go to the most recently finished session (first in sorted array)
-next_session="${done_sessions[0]}"
+# Find current session index in done sessions
+current_index=-1
+for i in "${!done_sessions[@]}"; do
+    if [ "${done_sessions[$i]}" = "$current_session" ]; then
+        current_index=$i
+        break
+    fi
+done
+
+# Calculate next index
+if [ $current_index -eq -1 ]; then
+    # Current session not in done list, switch to most recent done session
+    next_session="${done_sessions[0]}"
+else
+    # Switch to next done session (wrap around to most recent after last)
+    next_index=$(( (current_index + 1) % ${#done_sessions[@]} ))
+    next_session="${done_sessions[$next_index]}"
+fi
 
 # Switch to the next done session
 tmux switch-client -t "$next_session"

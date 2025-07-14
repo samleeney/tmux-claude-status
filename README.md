@@ -74,6 +74,7 @@ Add to your `~/.claude/settings.json`:
 
 Press `prefix + s` to open the enhanced session switcher.
 Press `prefix + n` to switch to the next 'done' project.
+Press `prefix + w` to put the current session in wait mode.
 
 ### Status Bar
 
@@ -82,6 +83,26 @@ The plugin automatically adds Claude status to your tmux status bar:
 - `⚡ N Claude(s) working` - Shows number of Claude instances currently processing
 
 A notification sound plays when any Claude finishes processing.
+
+### Wait Mode
+
+Wait mode allows you to temporarily defer a session and automatically switch to the next task:
+
+1. **Activate Wait Mode**: Press `prefix + w` in any session
+2. **Set Timer**: Enter wait time in minutes (e.g., `30` for 30 minutes)
+3. **Auto-Switch**: Automatically switches to next 'done' session
+4. **Countdown Display**: Shows remaining time in session switcher (`prefix + s`)
+5. **Status Counting**: Wait sessions count as 'working' in the status bar
+6. **Auto-Expiry**: Session returns to 'done' when timer expires with notification sound
+7. **Smart Cancellation**: Wait mode cancels if Claude starts working in that session
+
+**Wait Mode Workflow:**
+- Session marked as 'wait' with countdown timer
+- Automatically switches to next available 'done' session
+- If no 'done' sessions available, shows "✓ All done!"
+- Timer counts down and displays remaining time
+- When expired, session returns to 'done' status and plays notification
+- If Claude starts working in the wait session, wait mode is automatically cancelled
 
 ## How It Works
 

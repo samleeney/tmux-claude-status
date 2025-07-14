@@ -183,12 +183,6 @@ fi
 # Main
 sessions=$(get_sessions_with_status)
 
-# Start smart monitor (will auto-stop when no SSH sessions)
-MONITOR_SCRIPT="$(dirname "$0")/../smart-monitor.sh"
-if [ -f "$MONITOR_SCRIPT" ]; then
-    "$MONITOR_SCRIPT" start >/dev/null 2>&1
-fi
-
 # Add the reminder at the bottom of the session list
 sessions_with_reminder=$(echo -e "$(get_sessions_with_status)\n\n\033[1;36m━━━ Hit Ctrl-R if something doesn't look right! ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
 

@@ -82,7 +82,7 @@ if [ "$prev_working" -gt "$working" ] && [ "$prev_working" -gt 0 ]; then
 fi
 
 # Generate status line output
-if [ "$total" -eq 0 ]; then
+if [ "$total_claude" -eq 0 ]; then
     # No Claude sessions
     echo ""
 elif [ "$working" -eq 0 ] && [ "$done" -gt 0 ]; then

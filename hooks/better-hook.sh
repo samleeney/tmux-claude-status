@@ -46,21 +46,30 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 # Claude is starting to work - only if not in wait mode
                 if [ ! -f "$WAIT_FILE" ]; then
                     echo "working" > "$STATUS_FILE"
-                    echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    # Only write to remote status file if we're in an SSH session
+                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                        echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    fi
                 fi
                 ;;
             "Stop"|"SubagentStop")
                 # Claude has finished responding - only if not in wait mode
                 if [ ! -f "$WAIT_FILE" ]; then
                     echo "done" > "$STATUS_FILE"
-                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    # Only write to remote status file if we're in an SSH session
+                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                        echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    fi
                 fi
                 ;;
             "Notification")
                 # Claude is waiting for user input - only if not in wait mode
                 if [ ! -f "$WAIT_FILE" ]; then
                     echo "done" > "$STATUS_FILE"
-                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    # Only write to remote status file if we're in an SSH session
+                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                        echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    fi
                 fi
                 ;;
         esac

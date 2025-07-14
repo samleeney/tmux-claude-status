@@ -73,3 +73,17 @@ else
 fi
 
 tmux display-message "Session $current_session will wait for $wait_minutes minutes"
+
+# Switch to next done session or show completion message
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NEXT_DONE_SCRIPT="$SCRIPT_DIR/next-done-project.sh"
+
+if [ -f "$NEXT_DONE_SCRIPT" ]; then
+    # Try to switch to next done session (excluding current session)
+    if ! bash "$NEXT_DONE_SCRIPT" "$current_session" 2>/dev/null; then
+        # No done sessions available
+        tmux display-message "✓ All done! No more sessions to work on."
+    fi
+else
+    tmux display-message "Wait mode activated"
+fi

@@ -52,6 +52,9 @@ get_claude_status() {
 # Get current session
 current_session=$(tmux display-message -p "#{session_name}")
 
+# Check if we're being called with a session to exclude (from wait-session.sh)
+exclude_session="$1"
+
 # Collect all done sessions with their completion times
 done_sessions_with_times=()
 while IFS=: read -r name windows attached; do
@@ -69,7 +72,7 @@ while IFS=: read -r name windows attached; do
     if [ "$has_claude" = true ]; then
         [ -z "$claude_status" ] && claude_status="done"
         
-        if [ "$claude_status" = "done" ]; then
+        if [ "$claude_status" = "done" ] && [ "$name" != "$exclude_session" ]; then
             # Get completion time from status file modification time
             local status_file=""
             if is_ssh_session "$name"; then

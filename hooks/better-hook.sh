@@ -43,33 +43,30 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         
         case "$HOOK_TYPE" in
             "PreToolUse")
-                # Claude is starting to work - only if not in wait mode
-                if [ ! -f "$WAIT_FILE" ]; then
-                    echo "working" > "$STATUS_FILE"
-                    # Only write to remote status file if we're in an SSH session
-                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                        echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                    fi
+                # Claude is starting to work - cancel wait mode if active
+                if [ -f "$WAIT_FILE" ]; then
+                    rm -f "$WAIT_FILE"  # Remove wait timer
+                fi
+                echo "working" > "$STATUS_FILE"
+                # Only write to remote status file if we're in an SSH session
+                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                    echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
                 ;;
             "Stop"|"SubagentStop")
-                # Claude has finished responding - only if not in wait mode
-                if [ ! -f "$WAIT_FILE" ]; then
-                    echo "done" > "$STATUS_FILE"
-                    # Only write to remote status file if we're in an SSH session
-                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                        echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                    fi
+                # Claude has finished responding
+                echo "done" > "$STATUS_FILE"
+                # Only write to remote status file if we're in an SSH session
+                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
                 ;;
             "Notification")
-                # Claude is waiting for user input - only if not in wait mode
-                if [ ! -f "$WAIT_FILE" ]; then
-                    echo "done" > "$STATUS_FILE"
-                    # Only write to remote status file if we're in an SSH session
-                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                        echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                    fi
+                # Claude is waiting for user input
+                echo "done" > "$STATUS_FILE"
+                # Only write to remote status file if we're in an SSH session
+                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
                 ;;
         esac

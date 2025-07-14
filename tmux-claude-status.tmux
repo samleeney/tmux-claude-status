@@ -16,6 +16,9 @@ tmux bind-key "$key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-b
 # Set up keybinding to switch to next done project (prefix + n)
 tmux bind-key "n" run-shell "$CURRENT_DIR/scripts/next-done-project.sh"
 
+# Set up keybinding to put session in wait mode (prefix + w)
+tmux bind-key "w" run-shell "$CURRENT_DIR/scripts/wait-session.sh"
+
 # Set up tmux status line integration
 tmux set-option -g status-interval 1
 

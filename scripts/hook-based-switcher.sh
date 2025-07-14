@@ -67,6 +67,7 @@ get_claude_status() {
 get_sessions_with_status() {
     local working_sessions=()
     local done_sessions=()
+    local wait_sessions=()
     local no_claude_sessions=()
     
     # Collect all sessions into arrays
@@ -106,6 +107,25 @@ get_sessions_with_status() {
                     formatted_line=$(printf "%-20s %2s windows %-12s [⚡ working]" "$name" "$windows" "$attached")
                 fi
                 working_sessions+=("$formatted_line")
+            elif [ "$claude_status" = "wait" ]; then
+                # Calculate remaining wait time
+                local wait_file="$STATUS_DIR/wait/${name}.wait"
+                local wait_info=""
+                if [ -f "$wait_file" ]; then
+                    local expiry_time=$(cat "$wait_file" 2>/dev/null)
+                    local current_time=$(date +%s)
+                    local remaining=$(( expiry_time - current_time ))
+                    if [ "$remaining" -gt 0 ]; then
+                        local remaining_minutes=$(( remaining / 60 ))
+                        wait_info="(${remaining_minutes}m)"
+                    fi
+                fi
+                if [ -n "$ssh_indicator" ]; then
+                    formatted_line=$(printf "%-20s %2s windows %-12s %s [⏳ wait] %s" "$name" "$windows" "$attached" "$ssh_indicator" "$wait_info")
+                else
+                    formatted_line=$(printf "%-20s %2s windows %-12s [⏳ wait] %s" "$name" "$windows" "$attached" "$wait_info")
+                fi
+                wait_sessions+=("$formatted_line")
             else
                 if [ -n "$ssh_indicator" ]; then
                     formatted_line=$(printf "%-20s %2s windows %-12s %s [✓ done]" "$name" "$windows" "$attached" "$ssh_indicator")
@@ -139,9 +159,16 @@ get_sessions_with_status() {
         printf '%s\n' "${done_sessions[@]}"
     fi
     
+    # Wait sessions
+    if [ ${#wait_sessions[@]} -gt 0 ]; then
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] && echo
+        echo -e "\033[1;36m━━━ ⏳ WAIT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
+        printf '%s\n' "${wait_sessions[@]}"
+    fi
+    
     # No Claude sessions
     if [ ${#no_claude_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;90m━━━ NO CLAUDE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m"
         printf '%s\n' "${no_claude_sessions[@]}"
     fi

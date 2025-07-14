@@ -30,6 +30,7 @@ count_claude_status() {
                 case "$status" in
                     "working") ((working++)) ;;
                     "done") ((done++)) ;;
+                    "wait") ((done++)) ;;  # Treat wait as done for status line
                 esac
             fi
         elif [ -f "$status_file" ]; then
@@ -40,6 +41,7 @@ count_claude_status() {
                 case "$status" in
                     "working") ((working++)) ;;
                     "done") ((done++)) ;;
+                    "wait") ((done++)) ;;  # Treat wait as done for status line
                 esac
             fi
         fi

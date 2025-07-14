@@ -52,8 +52,8 @@ get_claude_status() {
 # Get current session
 current_session=$(tmux display-message -p "#{session_name}")
 
-# Collect all done sessions
-done_sessions=()
+# Collect all done sessions with their completion times
+done_sessions_with_times=()
 while IFS=: read -r name windows attached; do
     # Check if Claude is present
     claude_status=$(get_claude_status "$name")
@@ -70,10 +70,27 @@ while IFS=: read -r name windows attached; do
         [ -z "$claude_status" ] && claude_status="done"
         
         if [ "$claude_status" = "done" ]; then
-            done_sessions+=("$name")
+            # Get completion time from status file modification time
+            local status_file=""
+            if is_ssh_session "$name"; then
+                status_file="$STATUS_DIR/${name}-remote.status"
+            else
+                status_file="$STATUS_DIR/${name}.status"
+            fi
+            
+            local completion_time=0
+            if [ -f "$status_file" ]; then
+                completion_time=$(stat -c %Y "$status_file" 2>/dev/null || echo 0)
+            fi
+            
+            done_sessions_with_times+=("$completion_time:$name")
         fi
     fi
 done < <(tmux list-sessions -F "#{session_name}:#{session_windows}:#{?session_attached,(attached),}" 2>/dev/null || echo "")
+
+# Sort by completion time (most recent first) and extract session names
+IFS=$'\n' sorted_sessions=($(printf '%s\n' "${done_sessions_with_times[@]}" | sort -t: -k1,1nr | cut -d: -f2-))
+done_sessions=("${sorted_sessions[@]}")
 
 # If no done sessions, exit
 if [ ${#done_sessions[@]} -eq 0 ]; then
@@ -81,24 +98,8 @@ if [ ${#done_sessions[@]} -eq 0 ]; then
     exit 0
 fi
 
-# Find current session index in done sessions
-current_index=-1
-for i in "${!done_sessions[@]}"; do
-    if [ "${done_sessions[$i]}" = "$current_session" ]; then
-        current_index=$i
-        break
-    fi
-done
-
-# Calculate next index
-if [ $current_index -eq -1 ]; then
-    # Current session not in done list, switch to first done session
-    next_session="${done_sessions[0]}"
-else
-    # Switch to next done session (wrap around)
-    next_index=$(( (current_index + 1) % ${#done_sessions[@]} ))
-    next_session="${done_sessions[$next_index]}"
-fi
+# Always go to the most recently finished session (first in sorted array)
+next_session="${done_sessions[0]}"
 
 # Switch to the next done session
 tmux switch-client -t "$next_session"

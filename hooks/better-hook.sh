@@ -38,19 +38,30 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
     if [ -n "$TMUX_SESSION" ]; then
         HOOK_TYPE="$1"
         STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}.status"
+        REMOTE_STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}-remote.status"
+        WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
         
         case "$HOOK_TYPE" in
             "PreToolUse")
-                # Claude is starting to work
-                echo "working" > "$STATUS_FILE"
+                # Claude is starting to work - only if not in wait mode
+                if [ ! -f "$WAIT_FILE" ]; then
+                    echo "working" > "$STATUS_FILE"
+                    echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                fi
                 ;;
             "Stop"|"SubagentStop")
-                # Claude has finished responding
-                echo "done" > "$STATUS_FILE"
+                # Claude has finished responding - only if not in wait mode
+                if [ ! -f "$WAIT_FILE" ]; then
+                    echo "done" > "$STATUS_FILE"
+                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                fi
                 ;;
             "Notification")
-                # Claude is waiting for user input (questions, permissions, plan approval)
-                echo "done" > "$STATUS_FILE"
+                # Claude is waiting for user input - only if not in wait mode
+                if [ ! -f "$WAIT_FILE" ]; then
+                    echo "done" > "$STATUS_FILE"
+                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                fi
                 ;;
         esac
     fi

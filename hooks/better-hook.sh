@@ -22,6 +22,7 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
             # Check if we're on known servers and map to likely session names
             case $(hostname -s) in
                 instance-*) TMUX_SESSION="reachgpu" ;;  # Your GPU server
+                keen-schrodinger) TMUX_SESSION="sd1" ;;
                 sam-l4-workstation-image) TMUX_SESSION="l4-workstation" ;;
                 persistent-faraday) TMUX_SESSION="tig" ;;
                 instance-20250620-122051) TMUX_SESSION="reachgpu" ;;
@@ -59,6 +60,18 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 # Only write to remote status file if we're in an SSH session
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                fi
+                
+                # Play notification sound when Claude finishes
+                notification_sound="/usr/share/sounds/freedesktop/stereo/complete.oga"
+                if command -v paplay >/dev/null 2>&1 && [ -f "$notification_sound" ]; then
+                    paplay "$notification_sound" 2>/dev/null &
+                elif command -v afplay >/dev/null 2>&1; then
+                    afplay /System/Library/Sounds/Glass.aiff 2>/dev/null &
+                elif command -v beep >/dev/null 2>&1; then
+                    beep 2>/dev/null &
+                else
+                    echo -ne '\a'
                 fi
                 ;;
             "Notification")

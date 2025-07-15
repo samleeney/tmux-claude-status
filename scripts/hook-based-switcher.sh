@@ -2,6 +2,7 @@
 
 # Hook-based session switcher that reads status from files
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS_DIR="$HOME/.cache/tmux-claude-status"
 
 # Function to check if Claude is in a session (actually running, not just has status file)
@@ -180,22 +181,72 @@ if [ "$1" = "--no-fzf" ]; then
     exit 0
 fi
 
+# Function to perform full reset
+perform_full_reset() {
+    # Stop daemons
+    pkill -f "daemon-monitor.sh" 2>/dev/null
+    pkill -f "smart-monitor.sh" 2>/dev/null
+    
+    # Clear only stale cache files, not active working status
+    # Clear PID files
+    find "$STATUS_DIR" -type f -name "*.pid" -delete 2>/dev/null
+    
+    # Clear wait files
+    find "$STATUS_DIR/wait" -type f -name "*.wait" -delete 2>/dev/null
+    
+    # Clear temp files
+    rm -f "$STATUS_DIR"/.*.status.tmp 2>/dev/null
+    
+    # Check each status file and only remove if Claude is not running in that session
+    for status_file in "$STATUS_DIR"/*.status; do
+        [ ! -f "$status_file" ] && continue
+        
+        # Extract session name from filename
+        session_name=$(basename "$status_file" .status)
+        
+        # Skip remote status files
+        if [[ "$session_name" == *"-remote" ]]; then
+            continue
+        fi
+        
+        # Check if Claude is actually running in this session
+        if ! has_claude_in_session "$session_name"; then
+            # Claude is not running, safe to remove stale status
+            rm -f "$status_file"
+        fi
+    done
+    
+    # Restart smart-monitor daemon
+    "$SCRIPT_DIR/../smart-monitor.sh" stop >/dev/null 2>&1
+    "$SCRIPT_DIR/../smart-monitor.sh" start >/dev/null 2>&1
+    
+    # Restart daemon monitor
+    "$SCRIPT_DIR/daemon-monitor.sh" >/dev/null 2>&1 &
+}
+
+# Handle --reset flag for full reset
+if [ "$1" = "--reset" ]; then
+    perform_full_reset
+    get_sessions_with_status
+    exit 0
+fi
+
 # Main
 sessions=$(get_sessions_with_status)
 
 # Add the reminder at the bottom of the session list
-sessions_with_reminder=$(echo -e "$(get_sessions_with_status)\n\n\033[1;36m━━━ Hit Ctrl-R if something doesn't look right! ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
+sessions_with_reminder=$(echo -e "$(get_sessions_with_status)\n\n\033[1;36m━━━ Hit Ctrl-R to clear caches and reset everything! ━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
 
 # Use fzf with manual refresh (Ctrl-R)
 selected=$(echo "$sessions_with_reminder" | fzf \
     --ansi \
     --no-sort \
-    --header="Sessions grouped by Claude status | j/k: navigate | Enter: select | Esc: cancel | Ctrl-R: refresh" \
+    --header="Sessions grouped by Claude status | j/k: navigate | Enter: select | Esc: cancel | Ctrl-R: full reset" \
     --preview 'if echo {} | grep -q "━━━"; then echo "Category separator"; else session=$(echo {} | awk "{print \$1}"); tmux capture-pane -ep -t "$session" 2>/dev/null || echo "No preview available"; fi' \
     --preview-window=right:40%:wrap \
     --prompt="Session> " \
     --bind="j:down,k:up,ctrl-j:preview-down,ctrl-k:preview-up" \
-    --bind="ctrl-r:reload(bash '$0' --no-fzf)" \
+    --bind="ctrl-r:reload(bash '$0' --reset)" \
     --layout=reverse \
     --info=inline)
 

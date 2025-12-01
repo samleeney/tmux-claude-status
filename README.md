@@ -158,3 +158,7 @@ SSH sessions display as: `session-name [🌐 ssh] [⚡ working]`
 ## License
 
 MIT
+
+## Contributing
+
+PRs welcome. Keep changes focused, add/update docs where useful, and let the CI tmux keybinding checks pass. A brief note on how you tested is appreciated.

@@ -2,22 +2,28 @@
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Default key binding
-default_key="s"
-tmux_option_key="@claude-status-key"
+# Default key bindings
+default_switcher_key="S"
+default_next_done_key="N"
+default_wait_key="W"
 
-# Get user configuration or use default
-key=$(tmux show-option -gqv "$tmux_option_key")
-[ -z "$key" ] && key="$default_key"
+# Get user configuration or use defaults
+switcher_key=$(tmux show-option -gqv "@claude-status-key")
+next_done_key=$(tmux show-option -gqv "@claude-next-done-key")
+wait_key=$(tmux show-option -gqv "@claude-wait-key")
+
+[ -z "$switcher_key" ] && switcher_key="$default_switcher_key"
+[ -z "$next_done_key" ] && next_done_key="$default_next_done_key"
+[ -z "$wait_key" ] && wait_key="$default_wait_key"
 
 # Set up custom session switcher with Claude status (hook-based)
-tmux bind-key "$key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
+tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
 
-# Set up keybinding to switch to next done project (prefix + n)
-tmux bind-key "n" run-shell "$CURRENT_DIR/scripts/next-done-project.sh"
+# Set up keybinding to switch to next done project
+tmux bind-key "$next_done_key" run-shell "$CURRENT_DIR/scripts/next-done-project.sh"
 
-# Set up keybinding to put session in wait mode (prefix + w)
-tmux bind-key "w" run-shell "$CURRENT_DIR/scripts/wait-session.sh"
+# Set up keybinding to put session in wait mode
+tmux bind-key "$wait_key" run-shell "$CURRENT_DIR/scripts/wait-session.sh"
 
 # Set up tmux status line integration
 tmux set-option -g status-interval 1

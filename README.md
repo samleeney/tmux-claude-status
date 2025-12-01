@@ -72,9 +72,25 @@ Add to your `~/.claude/settings.json`:
 
 ## Usage
 
-Press `prefix + s` to open the enhanced session switcher.
-Press `prefix + n` to switch to the next 'done' project.
-Press `prefix + w` to put the current session in wait mode.
+By default:
+- Press `prefix + S` to open the enhanced session switcher.
+- Press `prefix + N` to switch to the next 'done' project.
+- Press `prefix + W` to put the current session in wait mode.
+
+You can customize these keys in your `tmux.conf` (e.g., to restore lowercase defaults or pick other keys):
+
+```tmux
+# Session switcher key (default: S)
+set -g @claude-status-key "s"
+
+# Next done project key (default: N)
+set -g @claude-next-done-key "n"
+
+# Wait mode key (default: W)
+set -g @claude-wait-key "w"
+```
+
+Defaults now use capital letters to avoid conflicts with tmux's `prefix + n` for `next-window`. Use any keys you prefer. 
 
 ### Status Bar
 

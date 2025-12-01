@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tmux-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Test default bindings (capital defaults)
+        run: |
+          set -euo pipefail
+          tmux kill-server >/dev/null 2>&1 || true
+          tmux -f /dev/null new-session -d -s claude-default 'sleep 5'
+          bash tmux-claude-status.tmux
+          tmux list-keys -T prefix | grep -qE ' -T prefix +S +display-popup .*hook-based-switcher.sh'
+          tmux list-keys -T prefix | grep -qE ' -T prefix +N +run-shell .*next-done-project.sh'
+          tmux list-keys -T prefix | grep -qE ' -T prefix +W +run-shell .*wait-session.sh'
+          tmux kill-server
+
+      - name: Test custom bindings (lowercase overrides)
+        run: |
+          set -euo pipefail
+          tmux kill-server >/dev/null 2>&1 || true
+          tmux -f /dev/null new-session -d -s claude-custom 'sleep 5'
+          tmux set-option -gq @claude-status-key a
+          tmux set-option -gq @claude-next-done-key b
+          tmux set-option -gq @claude-wait-key c
+          bash tmux-claude-status.tmux
+          tmux list-keys -T prefix | grep -qE ' -T prefix +a +display-popup .*hook-based-switcher.sh'
+          tmux list-keys -T prefix | grep -qE ' -T prefix +b +run-shell .*next-done-project.sh'
+          tmux list-keys -T prefix | grep -qE ' -T prefix +c +run-shell .*wait-session.sh'
+          tmux kill-server

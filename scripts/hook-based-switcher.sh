@@ -242,8 +242,8 @@ selected=$(echo "$sessions_with_reminder" | fzf \
     --ansi \
     --no-sort \
     --header="Sessions grouped by Claude status | j/k: navigate | Enter: select | Esc: cancel | Ctrl-R: full reset" \
-    --preview 'if echo {} | grep -q "━━━"; then echo "Category separator"; else session=$(echo {} | awk "{print \$1}"); tmux capture-pane -ep -t "$session" 2>/dev/null || echo "No preview available"; fi' \
-    --preview-window=right:40%:wrap \
+    --preview 'if echo {} | grep -q "━━━"; then echo "Category separator"; else session=$(echo {} | awk "{print \$1}"); tmux capture-pane -pJ -t "$session" 2>/dev/null | cat -s || echo "No preview available"; fi' \
+    --preview-window=right:40% \
     --prompt="Session> " \
     --bind="j:down,k:up,ctrl-j:preview-down,ctrl-k:preview-up" \
     --bind="ctrl-r:reload(bash '$0' --reset)" \

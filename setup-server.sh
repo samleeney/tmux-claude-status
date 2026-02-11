@@ -62,6 +62,16 @@ CLAUDE_SETTINGS='{
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-claude-status/hooks/better-hook.sh PreToolUse"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

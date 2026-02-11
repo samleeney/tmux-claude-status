@@ -61,7 +61,15 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
-                
+                ;;
+            "Notification")
+                # Claude is waiting for user input
+                echo "done" > "$STATUS_FILE"
+                # Only write to remote status file if we're in an SSH session
+                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                fi
+
                 # Play notification sound when Claude finishes
                 notification_sound="/usr/share/sounds/freedesktop/stereo/complete.oga"
                 if command -v paplay >/dev/null 2>&1 && [ -f "$notification_sound" ]; then
@@ -72,14 +80,6 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     beep 2>/dev/null &
                 else
                     echo -ne '\a'
-                fi
-                ;;
-            "Notification")
-                # Claude is waiting for user input
-                echo "done" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
-                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
                 ;;
         esac

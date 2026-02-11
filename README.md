@@ -46,6 +46,16 @@ Add to your `~/.claude/settings.json`:
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-claude-status/hooks/better-hook.sh PreToolUse"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -124,6 +134,7 @@ Wait mode allows you to temporarily defer a session and automatically switch to 
 
 The plugin uses [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to track status:
 - `UserPromptSubmit` - Sets status to "working" when the user submits a prompt
+- `PreToolUse` - Re-affirms "working" status when Claude calls a tool (backup trigger)
 - `Stop` - Sets status to "done" when Claude finishes processing
 - `Notification` - Sets status to "done" when Claude is waiting for user input (questions, permissions, etc.)
 

@@ -43,8 +43,8 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
         
         case "$HOOK_TYPE" in
-            "PreToolUse")
-                # Claude is starting to work - cancel wait mode if active
+            "UserPromptSubmit")
+                # User submitted a prompt - Claude is starting to work, cancel wait mode if active
                 if [ -f "$WAIT_FILE" ]; then
                     rm -f "$WAIT_FILE"  # Remove wait timer
                 fi

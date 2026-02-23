@@ -31,8 +31,7 @@ check_wait_timers() {
     [ ! -d "$wait_dir" ] && return
     
     local current_time=$(date +%s)
-    local notification_sound="/usr/share/sounds/freedesktop/stereo/complete.oga"
-    
+
     for wait_file in "$wait_dir"/*.wait; do
         [ ! -f "$wait_file" ] && continue
         
@@ -48,15 +47,7 @@ check_wait_timers() {
             rm -f "$wait_file"
             
             # Play notification sound (same as when Claude finishes)
-            if command -v paplay >/dev/null 2>&1 && [ -f "$notification_sound" ]; then
-                paplay "$notification_sound" 2>/dev/null &
-            elif command -v afplay >/dev/null 2>&1; then
-                afplay /System/Library/Sounds/Glass.aiff 2>/dev/null &
-            elif command -v beep >/dev/null 2>&1; then
-                beep 2>/dev/null &
-            else
-                echo -ne '\a'
-            fi
+            "$SCRIPT_DIR/scripts/play-sound.sh" &
         fi
     done
 }

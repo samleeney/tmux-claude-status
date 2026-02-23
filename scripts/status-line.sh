@@ -4,8 +4,8 @@
 # Shows Claude status across all sessions
 
 STATUS_DIR="$HOME/.cache/tmux-claude-status"
-NOTIFICATION_SOUND="/usr/share/sounds/freedesktop/stereo/complete.oga"
 LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Count Claude sessions by status
 count_claude_status() {
@@ -52,18 +52,7 @@ count_claude_status() {
 
 # Play notification sound
 play_notification() {
-    if command -v paplay >/dev/null 2>&1 && [ -f "$NOTIFICATION_SOUND" ]; then
-        paplay "$NOTIFICATION_SOUND" 2>/dev/null &
-    elif command -v afplay >/dev/null 2>&1; then
-        # macOS fallback
-        afplay /System/Library/Sounds/Glass.aiff 2>/dev/null &
-    elif command -v beep >/dev/null 2>&1; then
-        # Terminal beep fallback
-        beep 2>/dev/null &
-    else
-        # Last resort: terminal bell
-        echo -ne '\a'
-    fi
+    "$SCRIPT_DIR/play-sound.sh" &
 }
 
 # Get current status

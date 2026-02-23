@@ -71,16 +71,8 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 fi
 
                 # Play notification sound when Claude finishes
-                notification_sound="/usr/share/sounds/freedesktop/stereo/complete.oga"
-                if command -v paplay >/dev/null 2>&1 && [ -f "$notification_sound" ]; then
-                    paplay "$notification_sound" 2>/dev/null &
-                elif command -v afplay >/dev/null 2>&1; then
-                    afplay /System/Library/Sounds/Glass.aiff 2>/dev/null &
-                elif command -v beep >/dev/null 2>&1; then
-                    beep 2>/dev/null &
-                else
-                    echo -ne '\a'
-                fi
+                SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+                "$SCRIPT_DIR/../scripts/play-sound.sh" &
                 ;;
         esac
     fi

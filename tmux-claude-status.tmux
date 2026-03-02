@@ -25,6 +25,13 @@ tmux bind-key "$next_done_key" run-shell "$CURRENT_DIR/scripts/next-done-project
 # Set up keybinding to put session in wait mode
 tmux bind-key "$wait_key" run-shell "$CURRENT_DIR/scripts/wait-session.sh"
 
+# Detect iTerm2 Control Mode (tmux -CC) and skip status polling / daemons
+# to avoid interfering with the control protocol. Keybindings above are fine.
+control_mode=$(tmux display-message -p '#{client_control_mode}' 2>/dev/null)
+if [ "$control_mode" = "1" ]; then
+    exit 0
+fi
+
 # Set up tmux status line integration
 tmux set-option -g status-interval 1
 

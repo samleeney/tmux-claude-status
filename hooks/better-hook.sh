@@ -43,8 +43,8 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
         
         case "$HOOK_TYPE" in
-            "PreToolUse")
-                # Claude is starting to work - cancel wait mode if active
+            "UserPromptSubmit"|"PreToolUse")
+                # User submitted a prompt or Claude is calling a tool - cancel wait mode if active
                 if [ -f "$WAIT_FILE" ]; then
                     rm -f "$WAIT_FILE"  # Remove wait timer
                 fi
@@ -54,24 +54,12 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
                 ;;
-            "Stop"|"SubagentStop")
-                # Claude has finished responding
+            "Stop")
+                # Claude has finished responding (SubagentStop excluded - subagents finishing doesn't mean the main agent is done)
                 echo "done" > "$STATUS_FILE"
                 # Only write to remote status file if we're in an SSH session
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                fi
-                
-                # Play notification sound when Claude finishes
-                notification_sound="/usr/share/sounds/freedesktop/stereo/complete.oga"
-                if command -v paplay >/dev/null 2>&1 && [ -f "$notification_sound" ]; then
-                    paplay "$notification_sound" 2>/dev/null &
-                elif command -v afplay >/dev/null 2>&1; then
-                    afplay /System/Library/Sounds/Glass.aiff 2>/dev/null &
-                elif command -v beep >/dev/null 2>&1; then
-                    beep 2>/dev/null &
-                else
-                    echo -ne '\a'
                 fi
                 ;;
             "Notification")
@@ -81,6 +69,10 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
+
+                # Play notification sound when Claude finishes
+                SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+                "$SCRIPT_DIR/../scripts/play-sound.sh" &
                 ;;
         esac
     fi

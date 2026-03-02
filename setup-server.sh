@@ -52,6 +52,16 @@ scp "$SCRIPT_DIR/hooks/better-hook.sh" "$SSH_HOST:~/.config/tmux/plugins/tmux-cl
 echo "Setting up Claude hooks on remote..."
 CLAUDE_SETTINGS='{
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-claude-status/hooks/better-hook.sh UserPromptSubmit"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "hooks": [

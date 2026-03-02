@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SOUND_CHOICE=$(tmux show-option -gqv @claude-notification-sound 2>/dev/null)
-: "${SOUND_CHOICE:=bell}"
+: "${SOUND_CHOICE:=chime}"
 
 case "$SOUND_CHOICE" in
     none)
@@ -41,9 +41,9 @@ case "$SOUND_CHOICE" in
         MAC_SOUND="Glass.aiff"
         ;;
     *)
-        # unrecognised value falls back to bell
-        LINUX_SOUND="/usr/share/sounds/freedesktop/stereo/bell.oga"
-        MAC_SOUND="Ping.aiff"
+        # unrecognised value falls back to chime
+        LINUX_SOUND="/usr/share/sounds/freedesktop/stereo/complete.oga"
+        MAC_SOUND="Glass.aiff"
         ;;
 esac
 

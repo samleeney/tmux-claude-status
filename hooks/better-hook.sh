@@ -72,7 +72,7 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
 
                 # Play notification sound when Claude finishes
                 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-                "$SCRIPT_DIR/../scripts/play-sound.sh" &
+                "$SCRIPT_DIR/../scripts/play-sound.sh" 2>/dev/null &
                 ;;
         esac
     fi

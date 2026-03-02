@@ -54,13 +54,13 @@ set -g @claude-wait-key "w"
 A notification sound plays when Claude finishes. Configure with:
 
 ```tmux
-set -g @claude-notification-sound "bell"
+set -g @claude-notification-sound "chime"
 ```
 
 | Value | Description |
 |-------|-------------|
-| `bell` | Classic bell (default) |
-| `chime` | Subtle chime |
+| `chime` | Subtle chime (default) |
+| `bell` | Classic bell |
 | `fanfare` | Triumphant fanfare |
 | `frog` | Comical frog ribbit |
 | `speech` | TTS voice: "Claude ready" |

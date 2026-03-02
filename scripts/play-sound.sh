@@ -7,6 +7,11 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Ensure PulseAudio/PipeWire environment is available (hooks may lack user env)
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+: "${DISPLAY:=:0}"
+export XDG_RUNTIME_DIR DISPLAY
+
 SOUND_CHOICE=$(tmux show-option -gqv @claude-notification-sound 2>/dev/null)
 : "${SOUND_CHOICE:=chime}"
 
@@ -47,20 +52,21 @@ case "$SOUND_CHOICE" in
         ;;
 esac
 
+# Run sound players in foreground - callers background this script with &
 if [ -n "${BUNDLED_SOUND:-}" ] && [ -f "$BUNDLED_SOUND" ]; then
     if command -v paplay >/dev/null 2>&1; then
-        paplay "$BUNDLED_SOUND" 2>/dev/null &
+        paplay "$BUNDLED_SOUND" 2>/dev/null
     elif command -v afplay >/dev/null 2>&1; then
-        afplay "$BUNDLED_SOUND" 2>/dev/null &
+        afplay "$BUNDLED_SOUND" 2>/dev/null
     elif command -v aplay >/dev/null 2>&1; then
-        aplay "$BUNDLED_SOUND" 2>/dev/null &
+        aplay "$BUNDLED_SOUND" 2>/dev/null
     fi
 elif command -v paplay >/dev/null 2>&1 && [ -f "$LINUX_SOUND" ]; then
-    paplay "$LINUX_SOUND" 2>/dev/null &
+    paplay "$LINUX_SOUND" 2>/dev/null
 elif command -v afplay >/dev/null 2>&1; then
-    afplay "/System/Library/Sounds/$MAC_SOUND" 2>/dev/null &
+    afplay "/System/Library/Sounds/$MAC_SOUND" 2>/dev/null
 elif command -v beep >/dev/null 2>&1; then
-    beep 2>/dev/null &
+    beep 2>/dev/null
 else
     echo -ne '\a'
 fi

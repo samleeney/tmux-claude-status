@@ -7,6 +7,25 @@ STATUS_DIR="$HOME/.cache/tmux-claude-status"
 LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Check and expire wait timers
+check_wait_timers() {
+    local wait_dir="$STATUS_DIR/wait"
+    [ ! -d "$wait_dir" ] && return
+    local current_time=$(date +%s)
+    for wait_file in "$wait_dir"/*.wait; do
+        [ ! -f "$wait_file" ] && continue
+        local session_name=$(basename "$wait_file" .wait)
+        local expiry_time=$(cat "$wait_file" 2>/dev/null)
+        if [ -n "$expiry_time" ] && [ "$current_time" -ge "$expiry_time" ]; then
+            echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
+            echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
+            rm -f "$wait_file"
+        fi
+    done
+}
+
+check_wait_timers
+
 # Count Claude sessions by status
 count_claude_status() {
     local working=0

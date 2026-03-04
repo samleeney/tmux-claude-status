@@ -18,7 +18,8 @@ check_wait_timers() {
         local expiry_time=$(cat "$wait_file" 2>/dev/null)
         if [ -n "$expiry_time" ] && [ "$current_time" -ge "$expiry_time" ]; then
             echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
-            echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
+            # Only update remote status if it already exists (SSH sessions)
+            [ -f "$STATUS_DIR/${session_name}-remote.status" ] && echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
             rm -f "$wait_file"
         fi
     done

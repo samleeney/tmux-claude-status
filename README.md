@@ -68,6 +68,28 @@ set -g @claude-notification-sound "chime"
 
 Changes take effect immediately — no tmux reload needed.
 
+## Multi-Session Deploy
+
+Spin up parallel Claude Code sessions from within a running session. Each gets its own tmux session and git worktree for file isolation.
+
+Use the `/deploy` skill from Claude Code, or call the script directly:
+
+```bash
+cat > /tmp/manifest.json << 'EOF'
+{
+  "sessions": [
+    { "name": "refactor-auth", "prompt": "Refactor auth to use JWT..." },
+    { "prompt": "Write tests for the API endpoints..." }
+  ],
+  "working_directory": "/path/to/repo"
+}
+EOF
+
+bash ~/.config/tmux/plugins/tmux-claude-status/scripts/deploy-sessions.sh /tmp/manifest.json
+```
+
+Each session gets a `deploy/<name>` branch and worktree at `.claude/worktrees/<name>/`. Set `"worktrees": false` in the manifest if sessions need to collaborate on the same files. Status monitoring picks up new sessions automatically.
+
 ## SSH Sessions
 
 Track Claude status on remote servers:

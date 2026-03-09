@@ -2,7 +2,7 @@
 
 # Handler for wait session - called with wait time as argument
 
-STATUS_DIR="$HOME/.cache/tmux-claude-status"
+STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
 mkdir -p "$WAIT_DIR"
 
@@ -42,7 +42,7 @@ if [ -f "$NEXT_DONE_SCRIPT" ]; then
     # Try to switch to next done session (excluding current session)
     if ! bash "$NEXT_DONE_SCRIPT" "$current_session" 2>/dev/null; then
         # No done sessions available
-        tmux display-message "✓ All done! No more sessions to work on."
+        tmux display-message "All done! No more sessions to work on."
     fi
 else
     tmux display-message "Wait mode activated"

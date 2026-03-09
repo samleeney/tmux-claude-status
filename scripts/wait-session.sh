@@ -2,18 +2,18 @@
 
 # Put current session in wait mode with a timer
 
-STATUS_DIR="$HOME/.cache/tmux-claude-status"
+STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Get current session
 current_session=$(tmux display-message -p "#{session_name}")
 
-# Check if session has Claude
-has_claude_in_session() {
+# Check if session has an agent
+has_agent_in_session() {
     local session="$1"
     while IFS=: read -r pane_id pane_pid; do
-        if pgrep -P "$pane_pid" -f "claude" >/dev/null 2>&1; then
+        if pgrep -P "$pane_pid" -f "claude|codex" >/dev/null 2>&1; then
             return 0
         fi
     done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
@@ -32,11 +32,11 @@ is_ssh_session() {
     esac
 }
 
-# Check if session has Claude or is SSH session
-if ! has_claude_in_session "$current_session" && ! is_ssh_session "$current_session"; then
-    # Also check if session has a status file (might be from a finished Claude)
+# Check if session has an agent or is SSH session
+if ! has_agent_in_session "$current_session" && ! is_ssh_session "$current_session"; then
+    # Also check if session has a status file (might be from a finished agent)
     if [ ! -f "$STATUS_DIR/${current_session}.status" ] && [ ! -f "$STATUS_DIR/${current_session}-remote.status" ]; then
-        tmux display-message "Session $current_session has no Claude running"
+        tmux display-message "Session $current_session has no agent running"
         exit 1
     fi
 fi

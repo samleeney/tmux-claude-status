@@ -2,21 +2,31 @@
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# One-time cache directory migration
+OLD_DIR="$HOME/.cache/tmux-claude-status"
+NEW_DIR="$HOME/.cache/tmux-agent-status"
+if [ -d "$OLD_DIR" ] && [ ! -d "$NEW_DIR" ]; then
+    mv "$OLD_DIR" "$NEW_DIR"
+fi
+
 # Default key bindings
 default_switcher_key="S"
 default_next_done_key="N"
 default_wait_key="W"
 
-# Get user configuration or use defaults
-switcher_key=$(tmux show-option -gqv "@claude-status-key")
-next_done_key=$(tmux show-option -gqv "@claude-next-done-key")
-wait_key=$(tmux show-option -gqv "@claude-wait-key")
+# Get user configuration or use defaults (check new @agent-* first, fall back to @claude-*)
+switcher_key=$(tmux show-option -gqv "@agent-status-key")
+[ -z "$switcher_key" ] && switcher_key=$(tmux show-option -gqv "@claude-status-key")
+next_done_key=$(tmux show-option -gqv "@agent-next-done-key")
+[ -z "$next_done_key" ] && next_done_key=$(tmux show-option -gqv "@claude-next-done-key")
+wait_key=$(tmux show-option -gqv "@agent-wait-key")
+[ -z "$wait_key" ] && wait_key=$(tmux show-option -gqv "@claude-wait-key")
 
 [ -z "$switcher_key" ] && switcher_key="$default_switcher_key"
 [ -z "$next_done_key" ] && next_done_key="$default_next_done_key"
 [ -z "$wait_key" ] && wait_key="$default_wait_key"
 
-# Set up custom session switcher with Claude status (hook-based)
+# Set up custom session switcher with agent status (hook-based)
 tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
 
 # Set up keybinding to switch to next done project

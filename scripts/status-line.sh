@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 # Status line script for tmux status bar
-# Shows Claude status across all sessions
+# Shows agent status across all sessions
 
-STATUS_DIR="$HOME/.cache/tmux-claude-status"
+STATUS_DIR="$HOME/.cache/tmux-agent-status"
 LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -25,28 +25,54 @@ check_wait_timers() {
     done
 }
 
-check_wait_timers
+# Check for agent processes (Codex) via process polling
+# Claude uses hooks; Codex lacks proper hooks so we detect it here
+check_agent_processes() {
+    while IFS= read -r session; do
+        [ -z "$session" ] && continue
+        local status_file="$STATUS_DIR/${session}.status"
+        local has_codex=false
 
-# Count Claude sessions by status
-count_claude_status() {
+        # Check for codex process in session panes
+        while IFS=: read -r pane_id pane_pid; do
+            if pgrep -P "$pane_pid" -f "codex" >/dev/null 2>&1; then
+                has_codex=true
+                break
+            fi
+        done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
+
+        if [ "$has_codex" = true ]; then
+            local current_status=$(cat "$status_file" 2>/dev/null)
+            if [ "$current_status" != "working" ]; then
+                echo "working" > "$status_file"
+            fi
+        fi
+    done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
+}
+
+check_wait_timers
+check_agent_processes
+
+# Count agent sessions by status
+count_agent_status() {
     local working=0
     local done=0
-    local total_claude=0
-    
+    local total_agents=0
+
     # Check all tmux sessions including SSH remote status
     while IFS= read -r session; do
         [ -z "$session" ] && continue
-        
+
         # Check for SSH remote status file (e.g., reachgpu-remote.status)
         local remote_status_file="$STATUS_DIR/${session}-remote.status"
         local status_file="$STATUS_DIR/${session}.status"
-        
+
         # Check if we have any status for this session
         if [ -f "$remote_status_file" ]; then
             # SSH session with remote status
             local status=$(cat "$remote_status_file" 2>/dev/null)
             if [ -n "$status" ]; then
-                ((total_claude++))
+                ((total_agents++))
                 case "$status" in
                     "working") ((working++)) ;;
                     "done") ((done++)) ;;
@@ -57,7 +83,7 @@ count_claude_status() {
             # Local session status
             local status=$(cat "$status_file" 2>/dev/null)
             if [ -n "$status" ]; then
-                ((total_claude++))
+                ((total_agents++))
                 case "$status" in
                     "working") ((working++)) ;;
                     "done") ((done++)) ;;
@@ -66,8 +92,8 @@ count_claude_status() {
             fi
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
-    
-    echo "$working:$done:$total_claude"
+
+    echo "$working:$done:$total_agents"
 }
 
 # Play notification sound
@@ -76,7 +102,7 @@ play_notification() {
 }
 
 # Get current status
-IFS=':' read -r working done total_claude <<< "$(count_claude_status)"
+IFS=':' read -r working done total_agents <<< "$(count_agent_status)"
 
 # Load previous status
 prev_working=0
@@ -87,26 +113,26 @@ fi
 # Save current working count
 echo "$working" > "$LAST_STATUS_FILE"
 
-# Check if any Claude just finished (working count decreased)
+# Check if any agent just finished (working count decreased)
 if [ "$prev_working" -gt "$working" ] && [ "$prev_working" -gt 0 ]; then
     play_notification
 fi
 
 # Generate status line output
-if [ "$total_claude" -eq 0 ]; then
-    # No Claude sessions
+if [ "$total_agents" -eq 0 ]; then
+    # No agent sessions
     echo ""
 elif [ "$working" -eq 0 ] && [ "$done" -gt 0 ]; then
-    # All Claudes are done
-    echo "#[fg=green,bold]✓ All Claudes ready#[default]"
+    # All agents are done
+    echo "#[fg=green,bold]✓ All agents ready#[default]"
 elif [ "$working" -gt 0 ] && [ "$done" -gt 0 ]; then
     # Some working, some done
     echo "#[fg=yellow,bold]⚡ $working working#[default] #[fg=green]✓ $done done#[default]"
 elif [ "$working" -gt 0 ]; then
-    # All Claudes are working
+    # All agents are working
     if [ "$working" -eq 1 ]; then
-        echo "#[fg=yellow,bold]⚡ Claude is working#[default]"
+        echo "#[fg=yellow,bold]⚡ agent working#[default]"
     else
-        echo "#[fg=yellow,bold]⚡ $working Claudes are working#[default]"
+        echo "#[fg=yellow,bold]⚡ $working agents working#[default]"
     fi
 fi

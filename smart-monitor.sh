@@ -3,7 +3,7 @@
 # Smart monitoring daemon that only runs when SSH sessions exist
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATUS_DIR="$HOME/.cache/tmux-claude-status"
+STATUS_DIR="$HOME/.cache/tmux-agent-status"
 DAEMON_PID_FILE="$STATUS_DIR/smart-monitor.pid"
 
 # Function to check if any SSH sessions exist
@@ -16,11 +16,11 @@ has_ssh_sessions() {
             break
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
-    
+
     if [ "$found_ssh" = true ]; then
         return 0
     fi
-    
+
     # Also check for known SSH sessions like reachgpu
     tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -q "^reachgpu$"
 }
@@ -29,24 +29,24 @@ has_ssh_sessions() {
 check_wait_timers() {
     local wait_dir="$STATUS_DIR/wait"
     [ ! -d "$wait_dir" ] && return
-    
+
     local current_time=$(date +%s)
 
     for wait_file in "$wait_dir"/*.wait; do
         [ ! -f "$wait_file" ] && continue
-        
+
         local session_name=$(basename "$wait_file" .wait)
         local expiry_time=$(cat "$wait_file" 2>/dev/null)
-        
+
         if [ -n "$expiry_time" ] && [ "$current_time" -ge "$expiry_time" ]; then
             # Timer expired, move back to done
             echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
             echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
-            
+
             # Remove wait file
             rm -f "$wait_file"
-            
-            # Play notification sound (same as when Claude finishes)
+
+            # Play notification sound (same as when an agent finishes)
             "$SCRIPT_DIR/scripts/play-sound.sh" &
         fi
     done
@@ -64,10 +64,10 @@ update_ssh_status() {
     if tmux has-session -t reachgpu 2>/dev/null; then
         local temp_file="$STATUS_DIR/.reachgpu-remote.status.tmp"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
-            reachgpu "cat ~/.cache/tmux-claude-status/reachgpu.status 2>/dev/null || echo ''" \
+            reachgpu "cat ~/.cache/tmux-agent-status/reachgpu.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
             local remote_status=$(cat "$temp_file")
-            # If remote Claude is working, cancel local wait mode
+            # If remote agent is working, cancel local wait mode
             if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/reachgpu.wait" ]; then
                 rm -f "$STATUS_DIR/wait/reachgpu.wait"
             fi
@@ -81,15 +81,15 @@ update_ssh_status() {
             rm -f "$temp_file"
         fi
     fi
-    
+
     # Update tig status
     if tmux has-session -t tig 2>/dev/null; then
         local temp_file="$STATUS_DIR/.tig-remote.status.tmp"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
-            nga100 "cat ~/.cache/tmux-claude-status/tig.status 2>/dev/null || echo ''" \
+            nga100 "cat ~/.cache/tmux-agent-status/tig.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
             local remote_status=$(cat "$temp_file")
-            # If remote Claude is working, cancel local wait mode
+            # If remote agent is working, cancel local wait mode
             if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/tig.wait" ]; then
                 rm -f "$STATUS_DIR/wait/tig.wait"
             fi
@@ -103,15 +103,15 @@ update_ssh_status() {
             rm -f "$temp_file"
         fi
     fi
-    
+
     # Update l4-workstation status
     if tmux has-session -t l4-workstation 2>/dev/null; then
         local temp_file="$STATUS_DIR/.l4-workstation-remote.status.tmp"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
-            l4-workstation "cat ~/.cache/tmux-claude-status/l4-workstation.status 2>/dev/null || echo ''" \
+            l4-workstation "cat ~/.cache/tmux-agent-status/l4-workstation.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
             local remote_status=$(cat "$temp_file")
-            # If remote Claude is working, cancel local wait mode
+            # If remote agent is working, cancel local wait mode
             if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/l4-workstation.wait" ]; then
                 rm -f "$STATUS_DIR/wait/l4-workstation.wait"
             fi
@@ -125,9 +125,9 @@ update_ssh_status() {
             rm -f "$temp_file"
         fi
     fi
-    
+
     # ADD_SSH_SESSIONS_HERE
-    
+
     # Check wait timers and move expired sessions back to done
     check_wait_timers
 }
@@ -144,7 +144,7 @@ start_monitor() {
             rm -f "$DAEMON_PID_FILE"
         fi
     fi
-    
+
     (
         while should_run; do
             update_ssh_status
@@ -153,7 +153,7 @@ start_monitor() {
         # Clean up when done
         rm -f "$DAEMON_PID_FILE"
     ) &
-    
+
     echo $! > "$DAEMON_PID_FILE"
 }
 

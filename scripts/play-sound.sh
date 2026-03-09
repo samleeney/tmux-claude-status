@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-# Shared notification sound player for tmux-claude-status
-# Reads @claude-notification-sound from tmux options and plays the appropriate sound.
+# Shared notification sound player for tmux-agent-status
+# Reads @agent-notification-sound from tmux options and plays the appropriate sound.
+# Falls back to @claude-notification-sound for backwards compatibility.
 # Usage: play-sound.sh [&]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +13,8 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 : "${DISPLAY:=:0}"
 export XDG_RUNTIME_DIR DISPLAY
 
-SOUND_CHOICE=$(tmux show-option -gqv @claude-notification-sound 2>/dev/null)
+SOUND_CHOICE=$(tmux show-option -gqv @agent-notification-sound 2>/dev/null)
+[ -z "$SOUND_CHOICE" ] && SOUND_CHOICE=$(tmux show-option -gqv @claude-notification-sound 2>/dev/null)
 : "${SOUND_CHOICE:=chime}"
 
 case "$SOUND_CHOICE" in

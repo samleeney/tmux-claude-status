@@ -2,18 +2,18 @@
 
 # Find and switch to the next 'done' project
 
-STATUS_DIR="$HOME/.cache/tmux-claude-status"
+STATUS_DIR="$HOME/.cache/tmux-agent-status"
 
-# Function to check if Claude is in a session
-has_claude_in_session() {
+# Function to check if an agent is in a session
+has_agent_in_session() {
     local session="$1"
-    
+
     while IFS=: read -r pane_id pane_pid; do
-        if pgrep -P "$pane_pid" -f "claude" >/dev/null 2>&1; then
+        if pgrep -P "$pane_pid" -f "claude|codex" >/dev/null 2>&1; then
             return 0
         fi
     done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
-    
+
     return 1
 }
 
@@ -29,17 +29,17 @@ is_ssh_session() {
     esac
 }
 
-# Function to get Claude status
-get_claude_status() {
+# Function to get agent status
+get_agent_status() {
     local session="$1"
-    
+
     # Check for remote status file first (for SSH sessions)
     local remote_status="$STATUS_DIR/${session}-remote.status"
     if [ -f "$remote_status" ]; then
         cat "$remote_status" 2>/dev/null
         return
     fi
-    
+
     # Check local status files
     local status_file="$STATUS_DIR/${session}.status"
     if [ -f "$status_file" ]; then
@@ -58,21 +58,21 @@ exclude_session="$1"
 # Collect all done sessions with their completion times
 done_sessions_with_times=()
 while IFS=: read -r name windows attached; do
-    # Check if Claude is present
-    claude_status=$(get_claude_status "$name")
-    has_claude=false
-    
-    if has_claude_in_session "$name"; then
-        has_claude=true
-    elif [ -n "$claude_status" ] && is_ssh_session "$name"; then
+    # Check if an agent is present
+    agent_status=$(get_agent_status "$name")
+    has_agent=false
+
+    if has_agent_in_session "$name"; then
+        has_agent=true
+    elif [ -n "$agent_status" ] && is_ssh_session "$name"; then
         # SSH session with remote status
-        has_claude=true
+        has_agent=true
     fi
-    
-    if [ "$has_claude" = true ]; then
-        [ -z "$claude_status" ] && claude_status="done"
-        
-        if [ "$claude_status" = "done" ] && [ "$name" != "$exclude_session" ]; then
+
+    if [ "$has_agent" = true ]; then
+        [ -z "$agent_status" ] && agent_status="done"
+
+        if [ "$agent_status" = "done" ] && [ "$name" != "$exclude_session" ]; then
             # Get completion time from status file modification time
             local status_file=""
             if is_ssh_session "$name"; then
@@ -80,12 +80,12 @@ while IFS=: read -r name windows attached; do
             else
                 status_file="$STATUS_DIR/${name}.status"
             fi
-            
+
             local completion_time=0
             if [ -f "$status_file" ]; then
                 completion_time=$(stat -c %Y "$status_file" 2>/dev/null || echo 0)
             fi
-            
+
             done_sessions_with_times+=("$completion_time:$name")
         fi
     fi

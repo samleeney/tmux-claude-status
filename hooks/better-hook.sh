@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-# Claude Code hook for tmux status integration
+# Claude Code hook for tmux-agent-status
 # Updates tmux session status files based on Claude's working state
 
-STATUS_DIR="$HOME/.cache/tmux-claude-status"
+STATUS_DIR="$HOME/.cache/tmux-agent-status"
 mkdir -p "$STATUS_DIR"
 
 # Read JSON from stdin (required by Claude Code hooks)
@@ -13,7 +13,7 @@ JSON_INPUT=$(cat)
 if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
     # Try to get session name via tmux command first
     TMUX_SESSION=$(tmux display-message -p '#{session_name}' 2>/dev/null)
-    
+
     # If that fails (e.g., when called from Claude hooks or over SSH)
     if [ -z "$TMUX_SESSION" ]; then
         # For SSH sessions, try to auto-detect session name from the SSH connection
@@ -35,13 +35,13 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
             TMUX_SESSION=$(basename "$SOCKET_PATH")
         fi
     fi
-    
+
     if [ -n "$TMUX_SESSION" ]; then
         HOOK_TYPE="$1"
         STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}.status"
         REMOTE_STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}-remote.status"
         WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
-        
+
         case "$HOOK_TYPE" in
             "UserPromptSubmit"|"PreToolUse")
                 # User submitted a prompt or Claude is calling a tool - cancel wait mode if active

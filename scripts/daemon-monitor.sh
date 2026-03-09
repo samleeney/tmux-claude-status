@@ -4,7 +4,7 @@
 # This script should be called from tmux hooks
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATUS_DIR="$HOME/.cache/tmux-claude-status"
+STATUS_DIR="$HOME/.cache/tmux-agent-status"
 DAEMON_PID_FILE="$STATUS_DIR/smart-monitor.pid"
 MONITOR_PID_FILE="$STATUS_DIR/daemon-monitor.pid"
 SMART_MONITOR="$SCRIPT_DIR/../smart-monitor.sh"
@@ -24,7 +24,7 @@ fi
 # Start monitoring in background
 (
     echo $$ > "$MONITOR_PID_FILE"
-    
+
     while tmux list-sessions >/dev/null 2>&1; do
         # Check if smart-monitor is running
         if [ -f "$DAEMON_PID_FILE" ]; then
@@ -38,14 +38,14 @@ fi
             # No PID file, start daemon
             "$SMART_MONITOR" start >/dev/null 2>&1
         fi
-        
+
         # Check every 5 seconds
         sleep 5
     done
-    
+
     # Tmux is no longer running, clean up
     rm -f "$MONITOR_PID_FILE"
-    
+
     # Stop smart-monitor
     if [ -f "$DAEMON_PID_FILE" ]; then
         daemon_pid=$(cat "$DAEMON_PID_FILE" 2>/dev/null)

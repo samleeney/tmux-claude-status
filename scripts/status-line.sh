@@ -26,26 +26,33 @@ check_wait_timers() {
 }
 
 # Check for agent processes (Codex) via process polling
-# Claude uses hooks; Codex lacks proper hooks so we detect it here
+# Codex stays resident when idle, so we can only use process presence to:
+#   1. Set initial "working" when no status file exists yet
+#   2. Transition from "done" to "working" (user started a new prompt)
+# The notify hook handles the "working" -> "done" transition.
+# We detect active work by checking if codex has child processes (sandbox/tools).
 check_agent_processes() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
         local status_file="$STATUS_DIR/${session}.status"
-        local has_codex=false
+        local codex_pid=""
 
         # Check for codex process in session panes
         while IFS=: read -r pane_id pane_pid; do
-            if pgrep -P "$pane_pid" -f "codex" >/dev/null 2>&1; then
-                has_codex=true
+            local found_pid=$(pgrep -P "$pane_pid" -f "codex" 2>/dev/null | head -1)
+            if [ -n "$found_pid" ]; then
+                codex_pid="$found_pid"
                 break
             fi
         done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
 
-        if [ "$has_codex" = true ]; then
+        if [ -n "$codex_pid" ]; then
             local current_status=$(cat "$status_file" 2>/dev/null)
-            if [ "$current_status" != "working" ]; then
+            if [ -z "$current_status" ]; then
+                # No status file yet - first detection, assume working
                 echo "working" > "$status_file"
             fi
+            # Don't overwrite "done" - let the notify hook handle transitions
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 }

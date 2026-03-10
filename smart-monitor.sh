@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Smart monitoring daemon that only runs when SSH sessions exist
+# Smart monitoring daemon that runs when SSH sessions or wait timers exist
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
@@ -23,6 +23,18 @@ has_ssh_sessions() {
 
     # Also check for known SSH sessions like reachgpu
     tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -q "^reachgpu$"
+}
+
+# Function to check if any wait timers exist
+has_wait_timers() {
+    local wait_dir="$STATUS_DIR/wait"
+    [ ! -d "$wait_dir" ] && return 1
+
+    for wait_file in "$wait_dir"/*.wait; do
+        [ -f "$wait_file" ] && return 0
+    done
+
+    return 1
 }
 
 # Function to check wait timers and move expired sessions back to done
@@ -54,8 +66,8 @@ check_wait_timers() {
 
 # Function to check if daemon should keep running
 should_run() {
-    # Run if tmux is active and has SSH sessions
-    tmux list-sessions >/dev/null 2>&1 && has_ssh_sessions
+    # Run if tmux is active and we need either SSH polling or wait-timer expiry.
+    tmux list-sessions >/dev/null 2>&1 && { has_ssh_sessions || has_wait_timers; }
 }
 
 # Function to update SSH session status

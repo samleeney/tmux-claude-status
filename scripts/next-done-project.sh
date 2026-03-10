@@ -30,19 +30,36 @@ is_ssh_session() {
 }
 
 # Function to get agent status
+normalize_local_wait_status() {
+    local session="$1"
+    local status_file="$STATUS_DIR/${session}.status"
+    local wait_file="$STATUS_DIR/wait/${session}.wait"
+
+    [ ! -f "$status_file" ] && return
+
+    local status
+    status=$(cat "$status_file" 2>/dev/null || echo "")
+    if [ "$status" = "wait" ] && [ ! -f "$wait_file" ]; then
+        echo "done" > "$status_file" 2>/dev/null
+    fi
+}
+
 get_agent_status() {
     local session="$1"
 
     # Check for remote status file first (for SSH sessions)
     local remote_status="$STATUS_DIR/${session}-remote.status"
-    if [ -f "$remote_status" ]; then
+    if [ -f "$remote_status" ] && is_ssh_session "$session"; then
         cat "$remote_status" 2>/dev/null
         return
+    elif [ -f "$remote_status" ] && ! is_ssh_session "$session"; then
+        rm -f "$remote_status" 2>/dev/null
     fi
 
     # Check local status files
     local status_file="$STATUS_DIR/${session}.status"
     if [ -f "$status_file" ]; then
+        normalize_local_wait_status "$session"
         cat "$status_file" 2>/dev/null || echo ""
     else
         echo ""

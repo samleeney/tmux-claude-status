@@ -45,19 +45,36 @@ get_ssh_host() {
 }
 
 # Function to get agent status from hook files
+normalize_local_wait_status() {
+    local session="$1"
+    local status_file="$STATUS_DIR/${session}.status"
+    local wait_file="$STATUS_DIR/wait/${session}.wait"
+
+    [ ! -f "$status_file" ] && return
+
+    local status
+    status=$(cat "$status_file" 2>/dev/null || echo "")
+    if [ "$status" = "wait" ] && [ ! -f "$wait_file" ]; then
+        echo "done" > "$status_file" 2>/dev/null
+    fi
+}
+
 get_agent_status() {
     local session="$1"
 
     # Check for remote status file first (for SSH sessions)
     local remote_status="$STATUS_DIR/${session}-remote.status"
-    if [ -f "$remote_status" ]; then
+    if [ -f "$remote_status" ] && is_ssh_session "$session"; then
         cat "$remote_status" 2>/dev/null
         return
+    elif [ -f "$remote_status" ] && ! is_ssh_session "$session"; then
+        rm -f "$remote_status" 2>/dev/null
     fi
 
     # Check local status files
     local status_file="$STATUS_DIR/${session}.status"
     if [ -f "$status_file" ]; then
+        normalize_local_wait_status "$session"
         cat "$status_file" 2>/dev/null || echo ""
     else
         echo ""
@@ -191,8 +208,14 @@ perform_full_reset() {
     # Clear PID files
     find "$STATUS_DIR" -type f -name "*.pid" -delete 2>/dev/null
 
-    # Clear wait files
-    find "$STATUS_DIR/wait" -type f -name "*.wait" -delete 2>/dev/null
+    # Clear wait files and normalize matching wait statuses back to done
+    for wait_file in "$STATUS_DIR/wait"/*.wait; do
+        [ ! -f "$wait_file" ] && continue
+        session_name=$(basename "$wait_file" .wait)
+        [ -f "$STATUS_DIR/${session_name}.status" ] && echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
+        [ -f "$STATUS_DIR/${session_name}-remote.status" ] && echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
+        rm -f "$wait_file" 2>/dev/null
+    done
 
     # Clear temp files
     rm -f "$STATUS_DIR"/.*.status.tmp 2>/dev/null
@@ -210,6 +233,14 @@ perform_full_reset() {
         fi
 
         # Check if an agent is actually running in this session
+        if [ -f "$STATUS_DIR/wait/${session_name}.wait" ]; then
+            continue
+        fi
+
+        if [ "$(cat "$status_file" 2>/dev/null)" = "wait" ]; then
+            echo "done" > "$status_file" 2>/dev/null
+        fi
+
         if ! has_agent_in_session "$session_name"; then
             # No agent running, safe to remove stale status
             rm -f "$status_file"

@@ -7,6 +7,17 @@ STATUS_DIR="$HOME/.cache/tmux-agent-status"
 LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+is_ssh_session() {
+    local session="$1"
+    if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
+        return 0
+    fi
+    case "$session" in
+        reachgpu) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Check and expire wait timers
 check_wait_timers() {
     local wait_dir="$STATUS_DIR/wait"
@@ -23,6 +34,20 @@ check_wait_timers() {
             rm -f "$wait_file"
         fi
     done
+}
+
+normalize_local_wait_status() {
+    local session="$1"
+    local status_file="$STATUS_DIR/${session}.status"
+    local wait_file="$STATUS_DIR/wait/${session}.wait"
+
+    [ ! -f "$status_file" ] && return
+
+    local status
+    status=$(cat "$status_file" 2>/dev/null || echo "")
+    if [ "$status" = "wait" ] && [ ! -f "$wait_file" ]; then
+        echo "done" > "$status_file" 2>/dev/null
+    fi
 }
 
 # Check for agent processes (Codex) via process polling
@@ -112,7 +137,7 @@ count_agent_status() {
         local status_file="$STATUS_DIR/${session}.status"
 
         # Check if we have any status for this session
-        if [ -f "$remote_status_file" ]; then
+        if [ -f "$remote_status_file" ] && is_ssh_session "$session"; then
             # SSH session with remote status
             local status=$(cat "$remote_status_file" 2>/dev/null)
             if [ -n "$status" ]; then
@@ -123,8 +148,25 @@ count_agent_status() {
                     "wait") ((waiting++)) ;;
                 esac
             fi
+        elif [ -f "$remote_status_file" ] && ! is_ssh_session "$session"; then
+            # A remote cache for a non-SSH session is stale and should not override
+            # the local session status.
+            rm -f "$remote_status_file" 2>/dev/null
+            normalize_local_wait_status "$session"
+            if [ -f "$status_file" ]; then
+                local status=$(cat "$status_file" 2>/dev/null)
+                if [ -n "$status" ]; then
+                    ((total_agents++))
+                    case "$status" in
+                        "working") ((working++)) ;;
+                        "done") ((done++)) ;;
+                        "wait") ((waiting++)) ;;
+                    esac
+                fi
+            fi
         elif [ -f "$status_file" ]; then
             # Local session status
+            normalize_local_wait_status "$session"
             local status=$(cat "$status_file" 2>/dev/null)
             if [ -n "$status" ]; then
                 ((total_agents++))

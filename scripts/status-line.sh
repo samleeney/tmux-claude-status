@@ -31,28 +31,64 @@ check_wait_timers() {
 #   2. Transition from "done" to "working" (user started a new prompt)
 # The notify hook handles the "working" -> "done" transition.
 # We detect active work by checking if codex has child processes (sandbox/tools).
+find_session_codex_pid() {
+    local session="$1"
+
+    while IFS=: read -r pane_id pane_pid; do
+        local found_pid
+        found_pid=$(pgrep -P "$pane_pid" -f "codex" 2>/dev/null | head -1)
+        if [ -n "$found_pid" ]; then
+            echo "$found_pid"
+            return 0
+        fi
+    done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
+
+    return 1
+}
+
+get_deepest_codex_pid() {
+    local codex_pid="$1"
+    local child_codex_pid=""
+
+    while :; do
+        child_codex_pid=$(pgrep -P "$codex_pid" -f "codex" 2>/dev/null | head -1)
+        [ -z "$child_codex_pid" ] && break
+        codex_pid="$child_codex_pid"
+    done
+
+    echo "$codex_pid"
+}
+
+codex_session_is_working() {
+    local codex_pid="$1"
+    [ -z "$codex_pid" ] && return 1
+
+    local worker_pid
+    worker_pid=$(get_deepest_codex_pid "$codex_pid")
+    [ -z "$worker_pid" ] && return 1
+
+    # When Codex is handling a turn it spawns subprocesses under the deepest
+    # codex runner. When idle, the runner normally has no child processes.
+    pgrep -P "$worker_pid" >/dev/null 2>&1
+}
+
 check_agent_processes() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
         local status_file="$STATUS_DIR/${session}.status"
         local codex_pid=""
 
-        # Check for codex process in session panes
-        while IFS=: read -r pane_id pane_pid; do
-            local found_pid=$(pgrep -P "$pane_pid" -f "codex" 2>/dev/null | head -1)
-            if [ -n "$found_pid" ]; then
-                codex_pid="$found_pid"
-                break
-            fi
-        done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
+        codex_pid=$(find_session_codex_pid "$session" 2>/dev/null)
 
         if [ -n "$codex_pid" ]; then
-            local current_status=$(cat "$status_file" 2>/dev/null)
+            local current_status
+            current_status=$(cat "$status_file" 2>/dev/null)
             if [ -z "$current_status" ]; then
                 # No status file yet - first detection, assume working
                 echo "working" > "$status_file"
+            elif [ "$current_status" = "done" ] && codex_session_is_working "$codex_pid"; then
+                echo "working" > "$status_file"
             fi
-            # Don't overwrite "done" - let the notify hook handle transitions
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 }
@@ -63,6 +99,7 @@ check_agent_processes
 # Count agent sessions by status
 count_agent_status() {
     local working=0
+    local waiting=0
     local done=0
     local total_agents=0
 
@@ -83,7 +120,7 @@ count_agent_status() {
                 case "$status" in
                     "working") ((working++)) ;;
                     "done") ((done++)) ;;
-                    "wait") ((working++)) ;;  # Treat wait as working for status line
+                    "wait") ((waiting++)) ;;
                 esac
             fi
         elif [ -f "$status_file" ]; then
@@ -94,13 +131,13 @@ count_agent_status() {
                 case "$status" in
                     "working") ((working++)) ;;
                     "done") ((done++)) ;;
-                    "wait") ((working++)) ;;  # Treat wait as working for status line
+                    "wait") ((waiting++)) ;;
                 esac
             fi
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 
-    echo "$working:$done:$total_agents"
+    echo "$working:$waiting:$done:$total_agents"
 }
 
 # Play notification sound
@@ -109,37 +146,60 @@ play_notification() {
 }
 
 # Get current status
-IFS=':' read -r working done total_agents <<< "$(count_agent_status)"
+IFS=':' read -r working waiting done total_agents <<< "$(count_agent_status)"
 
-# Load previous status
-prev_working=0
+# Load previous status. Older versions stored only the working count; skip
+# notification diffing until we've written the new multi-count format once.
+prev_done=""
 if [ -f "$LAST_STATUS_FILE" ]; then
-    prev_working=$(cat "$LAST_STATUS_FILE" 2>/dev/null || echo "0")
+    prev_status=$(cat "$LAST_STATUS_FILE" 2>/dev/null || echo "")
+    if [[ "$prev_status" == *:* ]]; then
+        IFS=':' read -r _ _ prev_done <<< "$prev_status"
+    fi
 fi
 
-# Save current working count
-echo "$working" > "$LAST_STATUS_FILE"
+# Save current status counts
+echo "$working:$waiting:$done" > "$LAST_STATUS_FILE"
 
-# Check if any agent just finished (working count decreased)
-if [ "$prev_working" -gt "$working" ] && [ "$prev_working" -gt 0 ]; then
+# Check if any agent just finished (done count increased)
+if [ -n "$prev_done" ] && [ "$done" -gt "$prev_done" ]; then
     play_notification
 fi
+
+format_working_segment() {
+    local count="$1"
+    if [ "$count" -eq 1 ]; then
+        echo "#[fg=yellow,bold]⚡ agent working#[default]"
+    else
+        echo "#[fg=yellow,bold]⚡ $count working#[default]"
+    fi
+}
+
+format_waiting_segment() {
+    local count="$1"
+    if [ "$count" -eq 1 ]; then
+        echo "#[fg=cyan,bold]⏸ 1 waiting#[default]"
+    else
+        echo "#[fg=cyan,bold]⏸ $count waiting#[default]"
+    fi
+}
+
+format_done_segment() {
+    local count="$1"
+    echo "#[fg=green]✓ $count done#[default]"
+}
 
 # Generate status line output
 if [ "$total_agents" -eq 0 ]; then
     # No agent sessions
     echo ""
-elif [ "$working" -eq 0 ] && [ "$done" -gt 0 ]; then
+elif [ "$working" -eq 0 ] && [ "$waiting" -eq 0 ] && [ "$done" -gt 0 ]; then
     # All agents are done
     echo "#[fg=green,bold]✓ All agents ready#[default]"
-elif [ "$working" -gt 0 ] && [ "$done" -gt 0 ]; then
-    # Some working, some done
-    echo "#[fg=yellow,bold]⚡ $working working#[default] #[fg=green]✓ $done done#[default]"
-elif [ "$working" -gt 0 ]; then
-    # All agents are working
-    if [ "$working" -eq 1 ]; then
-        echo "#[fg=yellow,bold]⚡ agent working#[default]"
-    else
-        echo "#[fg=yellow,bold]⚡ $working agents working#[default]"
-    fi
+else
+    segments=()
+    [ "$working" -gt 0 ] && segments+=("$(format_working_segment "$working")")
+    [ "$waiting" -gt 0 ] && segments+=("$(format_waiting_segment "$waiting")")
+    [ "$done" -gt 0 ] && segments+=("$(format_done_segment "$done")")
+    printf '%s\n' "${segments[*]}"
 fi

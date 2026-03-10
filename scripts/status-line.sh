@@ -31,28 +31,64 @@ check_wait_timers() {
 #   2. Transition from "done" to "working" (user started a new prompt)
 # The notify hook handles the "working" -> "done" transition.
 # We detect active work by checking if codex has child processes (sandbox/tools).
+find_session_codex_pid() {
+    local session="$1"
+
+    while IFS=: read -r pane_id pane_pid; do
+        local found_pid
+        found_pid=$(pgrep -P "$pane_pid" -f "codex" 2>/dev/null | head -1)
+        if [ -n "$found_pid" ]; then
+            echo "$found_pid"
+            return 0
+        fi
+    done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
+
+    return 1
+}
+
+get_deepest_codex_pid() {
+    local codex_pid="$1"
+    local child_codex_pid=""
+
+    while :; do
+        child_codex_pid=$(pgrep -P "$codex_pid" -f "codex" 2>/dev/null | head -1)
+        [ -z "$child_codex_pid" ] && break
+        codex_pid="$child_codex_pid"
+    done
+
+    echo "$codex_pid"
+}
+
+codex_session_is_working() {
+    local codex_pid="$1"
+    [ -z "$codex_pid" ] && return 1
+
+    local worker_pid
+    worker_pid=$(get_deepest_codex_pid "$codex_pid")
+    [ -z "$worker_pid" ] && return 1
+
+    # When Codex is handling a turn it spawns subprocesses under the deepest
+    # codex runner. When idle, the runner normally has no child processes.
+    pgrep -P "$worker_pid" >/dev/null 2>&1
+}
+
 check_agent_processes() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
         local status_file="$STATUS_DIR/${session}.status"
         local codex_pid=""
 
-        # Check for codex process in session panes
-        while IFS=: read -r pane_id pane_pid; do
-            local found_pid=$(pgrep -P "$pane_pid" -f "codex" 2>/dev/null | head -1)
-            if [ -n "$found_pid" ]; then
-                codex_pid="$found_pid"
-                break
-            fi
-        done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
+        codex_pid=$(find_session_codex_pid "$session" 2>/dev/null)
 
         if [ -n "$codex_pid" ]; then
-            local current_status=$(cat "$status_file" 2>/dev/null)
+            local current_status
+            current_status=$(cat "$status_file" 2>/dev/null)
             if [ -z "$current_status" ]; then
                 # No status file yet - first detection, assume working
                 echo "working" > "$status_file"
+            elif [ "$current_status" = "done" ] && codex_session_is_working "$codex_pid"; then
+                echo "working" > "$status_file"
             fi
-            # Don't overwrite "done" - let the notify hook handle transitions
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 }

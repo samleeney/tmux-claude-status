@@ -23,6 +23,13 @@ case "${1:-}" in
     list-panes)
         echo "%1:4242"
         ;;
+    show-option)
+        if [ "${3:-}" = "@agent-notification-sound" ] || [ "${3:-}" = "@claude-notification-sound" ]; then
+            echo "none"
+            exit 0
+        fi
+        exit 0
+        ;;
     *)
         exit 1
         ;;

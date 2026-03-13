@@ -220,7 +220,7 @@ perform_full_reset() {
     pkill -f "daemon-monitor.sh" 2>/dev/null
     pkill -f "smart-monitor.sh" 2>/dev/null
 
-    # Clear only stale cache files, not active working status
+    # Clear stale caches and reset wait timers, but preserve explicit parked state.
     # Clear PID files
     find "$STATUS_DIR" -type f -name "*.pid" -delete 2>/dev/null
 
@@ -231,19 +231,6 @@ perform_full_reset() {
         [ -f "$STATUS_DIR/${session_name}.status" ] && echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
         [ -f "$STATUS_DIR/${session_name}-remote.status" ] && echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
         rm -f "$wait_file" 2>/dev/null
-    done
-
-    # Clear parked markers and normalize matching parked statuses back to done
-    for parked_file in "$PARKED_DIR"/*.parked; do
-        [ ! -f "$parked_file" ] && continue
-        session_name=$(basename "$parked_file" .parked)
-        if [ -f "$STATUS_DIR/${session_name}.status" ] && [ "$(cat "$STATUS_DIR/${session_name}.status" 2>/dev/null)" = "parked" ]; then
-            echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
-        fi
-        if [ -f "$STATUS_DIR/${session_name}-remote.status" ] && [ "$(cat "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null)" = "parked" ]; then
-            echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
-        fi
-        rm -f "$parked_file" 2>/dev/null
     done
 
     # Clear temp files
@@ -266,8 +253,12 @@ perform_full_reset() {
             continue
         fi
 
+        if [ -f "$PARKED_DIR/${session_name}.parked" ]; then
+            continue
+        fi
+
         status_value=$(cat "$status_file" 2>/dev/null)
-        if [ "$status_value" = "wait" ] || [ "$status_value" = "parked" ]; then
+        if [ "$status_value" = "wait" ]; then
             echo "done" > "$status_file" 2>/dev/null
         fi
 
@@ -296,13 +287,13 @@ fi
 sessions=$(get_sessions_with_status)
 
 # Add the reminder at the bottom of the session list
-sessions_with_reminder=$(echo -e "$(get_sessions_with_status)\n\n\033[1;36m Hit Ctrl-R to clear caches and reset everything! \033[0m")
+sessions_with_reminder=$(echo -e "$(get_sessions_with_status)\n\n\033[1;36m Hit Ctrl-R to clear stale caches and refresh! \033[0m")
 
 # Use fzf with manual refresh (Ctrl-R)
 selected=$(echo "$sessions_with_reminder" | fzf \
     --ansi \
     --no-sort \
-    --header="Sessions grouped by agent status | j/k: navigate | Enter: select | Esc: cancel | Ctrl-R: full reset" \
+    --header="Sessions grouped by agent status | j/k: navigate | Enter: select | Esc: cancel | Ctrl-R: clear stale caches" \
     --preview 'if echo {} | grep -q "━━━\|───"; then echo "Category separator"; else session=$(echo {} | awk "{print \$1}"); tmux capture-pane -pJ -t "$session" 2>/dev/null | cat -s || echo "No preview available"; fi' \
     --preview-window=right:40% \
     --prompt="Session> " \

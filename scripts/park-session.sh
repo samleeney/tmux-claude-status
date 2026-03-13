@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 
-# Put current session in wait mode with a timer
+# Park the current session so it stays in the switcher but drops out of the toolbar.
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
+PARKED_DIR="$STATUS_DIR/parked"
+mkdir -p "$PARKED_DIR"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/agent-processes.sh
 source "$SCRIPT_DIR/lib/agent-processes.sh"
 
-# Get current session
 current_session=$(tmux display-message -p "#{session_name}")
 
-# Check if session has an agent
 has_agent_in_session() {
     session_has_agent_process "$1"
 }
 
-# Check if session is SSH
 is_ssh_session() {
     local session="$1"
     if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
@@ -28,15 +28,27 @@ is_ssh_session() {
     esac
 }
 
-# Check if session has an agent or is SSH session
 if ! has_agent_in_session "$current_session" && ! is_ssh_session "$current_session"; then
-    # Also check if session has a status file (might be from a finished agent)
     if [ ! -f "$STATUS_DIR/${current_session}.status" ] && [ ! -f "$STATUS_DIR/${current_session}-remote.status" ]; then
-        tmux display-message "Session $current_session has no agent running"
+        tmux display-message "Session $current_session has no agent state to park"
         exit 1
     fi
 fi
 
-# Prompt for wait time using command-prompt
-# This will call our handler script with the session name and wait time
-tmux command-prompt -p "Wait time in minutes:" "run-shell '$SCRIPT_DIR/wait-session-handler.sh \"$current_session\" %1'"
+rm -f "$WAIT_DIR/$current_session.wait"
+: > "$PARKED_DIR/$current_session.parked"
+
+if is_ssh_session "$current_session"; then
+    echo "parked" > "$STATUS_DIR/${current_session}-remote.status"
+else
+    echo "parked" > "$STATUS_DIR/${current_session}.status"
+fi
+
+NEXT_DONE_SCRIPT="$SCRIPT_DIR/next-done-project.sh"
+if [ -f "$NEXT_DONE_SCRIPT" ]; then
+    if ! bash "$NEXT_DONE_SCRIPT" "$current_session" 2>/dev/null; then
+        tmux display-message "Session $current_session parked for later"
+    fi
+else
+    tmux display-message "Session $current_session parked for later"
+fi

@@ -3,18 +3,14 @@
 # Find and switch to the next 'done' project
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
+PARKED_DIR="$STATUS_DIR/parked"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/agent-processes.sh
+source "$SCRIPT_DIR/lib/agent-processes.sh"
 
 # Function to check if an agent is in a session
 has_agent_in_session() {
-    local session="$1"
-
-    while IFS=: read -r pane_id pane_pid; do
-        if pgrep -P "$pane_pid" -f "claude|codex" >/dev/null 2>&1; then
-            return 0
-        fi
-    done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
-
-    return 1
+    session_has_agent_process "$1"
 }
 
 # Function to check if session is SSH
@@ -46,6 +42,11 @@ normalize_local_wait_status() {
 
 get_agent_status() {
     local session="$1"
+
+    if [ -f "$PARKED_DIR/${session}.parked" ]; then
+        echo "parked"
+        return
+    fi
 
     # Check for remote status file first (for SSH sessions)
     local remote_status="$STATUS_DIR/${session}-remote.status"
@@ -91,14 +92,14 @@ while IFS=: read -r name windows attached; do
 
         if [ "$agent_status" = "done" ] && [ "$name" != "$exclude_session" ]; then
             # Get completion time from status file modification time
-            local status_file=""
+            status_file=""
             if is_ssh_session "$name"; then
                 status_file="$STATUS_DIR/${name}-remote.status"
             else
                 status_file="$STATUS_DIR/${name}.status"
             fi
 
-            local completion_time=0
+            completion_time=0
             if [ -f "$status_file" ]; then
                 completion_time=$(stat -c %Y "$status_file" 2>/dev/null || echo 0)
             fi
@@ -115,7 +116,7 @@ done_sessions=("${sorted_sessions[@]}")
 # If no done sessions, exit
 if [ ${#done_sessions[@]} -eq 0 ]; then
     tmux display-message "No done projects found"
-    exit 0
+    exit 1
 fi
 
 # Find current session index in done sessions

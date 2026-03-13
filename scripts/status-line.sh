@@ -4,8 +4,11 @@
 # Shows agent status across all sessions
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
+PARKED_DIR="$STATUS_DIR/parked"
 LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/agent-processes.sh
+source "$SCRIPT_DIR/lib/agent-processes.sh"
 
 is_ssh_session() {
     local session="$1"
@@ -57,18 +60,7 @@ normalize_local_wait_status() {
 # The notify hook handles the "working" -> "done" transition.
 # We detect active work by checking if codex has child processes (sandbox/tools).
 find_session_codex_pid() {
-    local session="$1"
-
-    while IFS=: read -r pane_id pane_pid; do
-        local found_pid
-        found_pid=$(pgrep -P "$pane_pid" -f "codex" 2>/dev/null | head -1)
-        if [ -n "$found_pid" ]; then
-            echo "$found_pid"
-            return 0
-        fi
-    done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
-
-    return 1
+    find_session_agent_pid "$1" "codex"
 }
 
 get_deepest_codex_pid() {
@@ -101,18 +93,36 @@ check_agent_processes() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
         local status_file="$STATUS_DIR/${session}.status"
+        local wait_file="$STATUS_DIR/wait/${session}.wait"
+        local parked_file="$PARKED_DIR/${session}.parked"
         local codex_pid=""
 
         codex_pid=$(find_session_codex_pid "$session" 2>/dev/null)
 
         if [ -n "$codex_pid" ]; then
             local current_status
-            current_status=$(cat "$status_file" 2>/dev/null)
+            if [ -f "$parked_file" ]; then
+                current_status="parked"
+            else
+                current_status=$(cat "$status_file" 2>/dev/null)
+            fi
             if [ -z "$current_status" ]; then
                 # No status file yet - first detection, assume working
                 echo "working" > "$status_file"
-            elif [ "$current_status" = "done" ] && codex_session_is_working "$codex_pid"; then
-                echo "working" > "$status_file"
+            elif codex_session_is_working "$codex_pid"; then
+                case "$current_status" in
+                    "done")
+                        echo "working" > "$status_file"
+                        ;;
+                    "wait")
+                        rm -f "$wait_file"
+                        echo "working" > "$status_file"
+                        ;;
+                    "parked")
+                        rm -f "$parked_file"
+                        echo "working" > "$status_file"
+                        ;;
+                esac
             fi
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
@@ -132,6 +142,11 @@ count_agent_status() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
 
+        local parked_file="$PARKED_DIR/${session}.parked"
+        if [ -f "$parked_file" ]; then
+            continue
+        fi
+
         # Check for SSH remote status file (e.g., reachgpu-remote.status)
         local remote_status_file="$STATUS_DIR/${session}-remote.status"
         local status_file="$STATUS_DIR/${session}.status"
@@ -141,11 +156,10 @@ count_agent_status() {
             # SSH session with remote status
             local status=$(cat "$remote_status_file" 2>/dev/null)
             if [ -n "$status" ]; then
-                ((total_agents++))
                 case "$status" in
-                    "working") ((working++)) ;;
-                    "done") ((done++)) ;;
-                    "wait") ((waiting++)) ;;
+                    "working") ((working++)); ((total_agents++)) ;;
+                    "done") ((done++)); ((total_agents++)) ;;
+                    "wait") ((waiting++)); ((total_agents++)) ;;
                 esac
             fi
         elif [ -f "$remote_status_file" ] && ! is_ssh_session "$session"; then
@@ -156,11 +170,10 @@ count_agent_status() {
             if [ -f "$status_file" ]; then
                 local status=$(cat "$status_file" 2>/dev/null)
                 if [ -n "$status" ]; then
-                    ((total_agents++))
                     case "$status" in
-                        "working") ((working++)) ;;
-                        "done") ((done++)) ;;
-                        "wait") ((waiting++)) ;;
+                        "working") ((working++)); ((total_agents++)) ;;
+                        "done") ((done++)); ((total_agents++)) ;;
+                        "wait") ((waiting++)); ((total_agents++)) ;;
                     esac
                 fi
             fi
@@ -169,11 +182,10 @@ count_agent_status() {
             normalize_local_wait_status "$session"
             local status=$(cat "$status_file" 2>/dev/null)
             if [ -n "$status" ]; then
-                ((total_agents++))
                 case "$status" in
-                    "working") ((working++)) ;;
-                    "done") ((done++)) ;;
-                    "wait") ((waiting++)) ;;
+                    "working") ((working++)); ((total_agents++)) ;;
+                    "done") ((done++)); ((total_agents++)) ;;
+                    "wait") ((waiting++)); ((total_agents++)) ;;
                 esac
             fi
         fi

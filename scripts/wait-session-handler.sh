@@ -4,6 +4,7 @@
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
+PARKED_DIR="$STATUS_DIR/parked"
 mkdir -p "$WAIT_DIR"
 
 current_session="$1"
@@ -23,6 +24,9 @@ echo "$expiry_time" > "$WAIT_DIR/$current_session.wait"
 
 # Small delay to ensure wait file is written
 sync
+
+# Wait mode overrides any parked marker.
+rm -f "$PARKED_DIR/$current_session.parked"
 
 # Set session status to wait
 # Check if it's an SSH session by looking for remote status file

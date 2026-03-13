@@ -41,12 +41,16 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}.status"
         REMOTE_STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}-remote.status"
         WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
+        PARKED_FILE="$STATUS_DIR/parked/${TMUX_SESSION}.parked"
 
         case "$HOOK_TYPE" in
             "UserPromptSubmit"|"PreToolUse")
                 # User submitted a prompt or Claude is calling a tool - cancel wait mode if active
                 if [ -f "$WAIT_FILE" ]; then
                     rm -f "$WAIT_FILE"  # Remove wait timer
+                fi
+                if [ -f "$PARKED_FILE" ]; then
+                    rm -f "$PARKED_FILE"
                 fi
                 echo "working" > "$STATUS_FILE"
                 # Only write to remote status file if we're in an SSH session

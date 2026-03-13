@@ -51,3 +51,10 @@ jobs:
           tmux list-keys -T prefix | grep -qE ' -T prefix +y +run-shell .*next-done-project.sh'
           tmux list-keys -T prefix | grep -qE ' -T prefix +z +run-shell .*wait-session.sh'
           tmux kill-server
+
+      - name: Run regression tests
+        run: |
+          set -euo pipefail
+          for test_script in tests/*.sh; do
+            bash "$test_script"
+          done

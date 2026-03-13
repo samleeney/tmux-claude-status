@@ -4,19 +4,13 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
+PARKED_DIR="$STATUS_DIR/parked"
+# shellcheck source=lib/agent-processes.sh
+source "$SCRIPT_DIR/lib/agent-processes.sh"
 
 # Function to check if an agent (Claude or Codex) is in a session
 has_agent_in_session() {
-    local session="$1"
-
-    # Check all panes in the session for agent processes
-    while IFS=: read -r pane_id pane_pid; do
-        if pgrep -P "$pane_pid" -f "claude|codex" >/dev/null 2>&1; then
-            return 0  # Found agent process
-        fi
-    done < <(tmux list-panes -t "$session" -F "#{pane_id}:#{pane_pid}" 2>/dev/null)
-
-    return 1  # No agent process found
+    session_has_agent_process "$1"
 }
 
 # Function to check if session is SSH by examining panes
@@ -62,6 +56,11 @@ normalize_local_wait_status() {
 get_agent_status() {
     local session="$1"
 
+    if [ -f "$PARKED_DIR/${session}.parked" ]; then
+        echo "parked"
+        return
+    fi
+
     # Check for remote status file first (for SSH sessions)
     local remote_status="$STATUS_DIR/${session}-remote.status"
     if [ -f "$remote_status" ] && is_ssh_session "$session"; then
@@ -86,6 +85,7 @@ get_sessions_with_status() {
     local working_sessions=()
     local done_sessions=()
     local wait_sessions=()
+    local parked_sessions=()
     local no_agent_sessions=()
 
     # Collect all sessions into arrays
@@ -103,6 +103,8 @@ get_sessions_with_status() {
         local has_agent=false
 
         if has_agent_in_session "$name"; then
+            has_agent=true
+        elif [ "$agent_status" = "parked" ]; then
             has_agent=true
         elif [ -n "$agent_status" ] && is_ssh_session "$name"; then
             # SSH session with remote status
@@ -144,6 +146,13 @@ get_sessions_with_status() {
                     formatted_line=$(printf "%-20s %2s windows %-12s [wait] %s" "$name" "$windows" "$attached" "$wait_info")
                 fi
                 wait_sessions+=("$formatted_line")
+            elif [ "$agent_status" = "parked" ]; then
+                if [ -n "$ssh_indicator" ]; then
+                    formatted_line=$(printf "%-20s %2s windows %-12s %s [parked]" "$name" "$windows" "$attached" "$ssh_indicator")
+                else
+                    formatted_line=$(printf "%-20s %2s windows %-12s [parked]" "$name" "$windows" "$attached")
+                fi
+                parked_sessions+=("$formatted_line")
             else
                 if [ -n "$ssh_indicator" ]; then
                     formatted_line=$(printf "%-20s %2s windows %-12s %s [done]" "$name" "$windows" "$attached" "$ssh_indicator")
@@ -184,9 +193,16 @@ get_sessions_with_status() {
         printf '%s\n' "${wait_sessions[@]}"
     fi
 
+    # Parked sessions
+    if [ ${#parked_sessions[@]} -gt 0 ]; then
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] && echo
+        echo -e "\033[1;35m PARKED \033[0m"
+        printf '%s\n' "${parked_sessions[@]}"
+    fi
+
     # No agent sessions
     if [ ${#no_agent_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] || [ ${#parked_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;90m NO AGENT \033[0m"
         printf '%s\n' "${no_agent_sessions[@]}"
     fi
@@ -217,6 +233,19 @@ perform_full_reset() {
         rm -f "$wait_file" 2>/dev/null
     done
 
+    # Clear parked markers and normalize matching parked statuses back to done
+    for parked_file in "$PARKED_DIR"/*.parked; do
+        [ ! -f "$parked_file" ] && continue
+        session_name=$(basename "$parked_file" .parked)
+        if [ -f "$STATUS_DIR/${session_name}.status" ] && [ "$(cat "$STATUS_DIR/${session_name}.status" 2>/dev/null)" = "parked" ]; then
+            echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
+        fi
+        if [ -f "$STATUS_DIR/${session_name}-remote.status" ] && [ "$(cat "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null)" = "parked" ]; then
+            echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
+        fi
+        rm -f "$parked_file" 2>/dev/null
+    done
+
     # Clear temp files
     rm -f "$STATUS_DIR"/.*.status.tmp 2>/dev/null
 
@@ -237,7 +266,8 @@ perform_full_reset() {
             continue
         fi
 
-        if [ "$(cat "$status_file" 2>/dev/null)" = "wait" ]; then
+        status_value=$(cat "$status_file" 2>/dev/null)
+        if [ "$status_value" = "wait" ] || [ "$status_value" = "parked" ]; then
             echo "done" > "$status_file" 2>/dev/null
         fi
 

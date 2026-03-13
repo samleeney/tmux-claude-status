@@ -4,6 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
+PARKED_DIR="$STATUS_DIR/parked"
 DAEMON_PID_FILE="$STATUS_DIR/smart-monitor.pid"
 
 # Function to check if any SSH sessions exist
@@ -75,16 +76,21 @@ update_ssh_status() {
     # Update reachgpu status
     if tmux has-session -t reachgpu 2>/dev/null; then
         local temp_file="$STATUS_DIR/.reachgpu-remote.status.tmp"
+        local wait_file="$STATUS_DIR/wait/reachgpu.wait"
+        local parked_file="$PARKED_DIR/reachgpu.parked"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
             reachgpu "cat ~/.cache/tmux-agent-status/reachgpu.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
             local remote_status=$(cat "$temp_file")
             # If remote agent is working, cancel local wait mode
-            if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/reachgpu.wait" ]; then
-                rm -f "$STATUS_DIR/wait/reachgpu.wait"
+            if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
+                rm -f "$wait_file"
             fi
-            # Don't overwrite local wait status at all
-            if [ ! -f "$STATUS_DIR/wait/reachgpu.wait" ]; then
+            if [ "$remote_status" = "working" ] && [ -f "$parked_file" ]; then
+                rm -f "$parked_file"
+            fi
+            # Don't overwrite local wait or parked overrides.
+            if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then
                 mv "$temp_file" "$STATUS_DIR/reachgpu-remote.status"
             else
                 rm -f "$temp_file"
@@ -97,16 +103,21 @@ update_ssh_status() {
     # Update tig status
     if tmux has-session -t tig 2>/dev/null; then
         local temp_file="$STATUS_DIR/.tig-remote.status.tmp"
+        local wait_file="$STATUS_DIR/wait/tig.wait"
+        local parked_file="$PARKED_DIR/tig.parked"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
             nga100 "cat ~/.cache/tmux-agent-status/tig.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
             local remote_status=$(cat "$temp_file")
             # If remote agent is working, cancel local wait mode
-            if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/tig.wait" ]; then
-                rm -f "$STATUS_DIR/wait/tig.wait"
+            if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
+                rm -f "$wait_file"
             fi
-            # Don't overwrite local wait status at all
-            if [ ! -f "$STATUS_DIR/wait/tig.wait" ]; then
+            if [ "$remote_status" = "working" ] && [ -f "$parked_file" ]; then
+                rm -f "$parked_file"
+            fi
+            # Don't overwrite local wait or parked overrides.
+            if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then
                 mv "$temp_file" "$STATUS_DIR/tig-remote.status"
             else
                 rm -f "$temp_file"
@@ -119,16 +130,21 @@ update_ssh_status() {
     # Update l4-workstation status
     if tmux has-session -t l4-workstation 2>/dev/null; then
         local temp_file="$STATUS_DIR/.l4-workstation-remote.status.tmp"
+        local wait_file="$STATUS_DIR/wait/l4-workstation.wait"
+        local parked_file="$PARKED_DIR/l4-workstation.parked"
         if ssh -o ConnectTimeout=2 -o BatchMode=yes -o StrictHostKeyChecking=no -o LogLevel=QUIET \
             l4-workstation "cat ~/.cache/tmux-agent-status/l4-workstation.status 2>/dev/null || echo ''" \
             > "$temp_file" 2>/dev/null; then
             local remote_status=$(cat "$temp_file")
             # If remote agent is working, cancel local wait mode
-            if [ "$remote_status" = "working" ] && [ -f "$STATUS_DIR/wait/l4-workstation.wait" ]; then
-                rm -f "$STATUS_DIR/wait/l4-workstation.wait"
+            if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
+                rm -f "$wait_file"
             fi
-            # Don't overwrite local wait status at all
-            if [ ! -f "$STATUS_DIR/wait/l4-workstation.wait" ]; then
+            if [ "$remote_status" = "working" ] && [ -f "$parked_file" ]; then
+                rm -f "$parked_file"
+            fi
+            # Don't overwrite local wait or parked overrides.
+            if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then
                 mv "$temp_file" "$STATUS_DIR/l4-workstation-remote.status"
             else
                 rm -f "$temp_file"

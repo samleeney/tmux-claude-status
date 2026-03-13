@@ -67,7 +67,7 @@ When Codex ships proper event hooks, the plugin will upgrade to hook-based track
 
 Integrate any AI coding tool (Aider, Continue, Cursor, Cline, GitHub Copilot CLI, Goose, Amazon Q, Windsurf, or your own agent):
 
-1. **Status files**: Write `working` or `done` to `~/.cache/tmux-agent-status/<session>.status`
+1. **Status files**: Write `working`, `done`, `wait`, or `parked` to `~/.cache/tmux-agent-status/<session>.status`
 2. **Process polling**: Add your process name to `check_agent_processes()` in `scripts/status-line.sh`
 
 ## Usage
@@ -77,9 +77,11 @@ Integrate any AI coding tool (Aider, Continue, Cursor, Cline, GitHub Copilot CLI
 | `prefix + S` | AI session manager: switcher grouped by agent state |
 | `prefix + N` | Jump to next idle AI session |
 | `prefix + W` | Snooze session (timed wait mode) |
+| `prefix + p` | Park session for later (switcher-only) |
 
 The status bar shows live agent activity:
 - `⚡ agent working` / `⚡ 3 working ✓ 2 done` / `✓ All agents ready`
+- Parked sessions stay visible in the switcher but are hidden from the status bar counts.
 
 ### Keybindings
 
@@ -87,6 +89,7 @@ The status bar shows live agent activity:
 set -g @agent-status-key "s"
 set -g @agent-next-done-key "n"
 set -g @agent-wait-key "w"
+set -g @agent-park-key "p"
 ```
 
 Old `@claude-*` options still work as fallbacks.
@@ -134,7 +137,8 @@ Works with GCP, AWS, Azure, Lambda Labs, or any SSH host.
                                │  "working"       │     ┌──────────────┐
 ┌─────────────┐  status files  │  "done"          ├────►│ prefix + S   │
 │ Custom agent├──────────────►│  "wait"           │     │ switcher     │
-└─────────────┘                └──────────────────┘     └──────────────┘
+└─────────────┘                │  "parked"        │     └──────────────┘
+                               └──────────────────┘
 ```
 
 - **Claude Code**: Hook-based. AI agent reports state transitions directly

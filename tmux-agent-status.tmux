@@ -13,6 +13,7 @@ fi
 default_switcher_key="S"
 default_next_done_key="N"
 default_wait_key="W"
+default_park_key="p"
 
 # Get user configuration or use defaults (check new @agent-* first, fall back to @claude-*)
 switcher_key=$(tmux show-option -gqv "@agent-status-key")
@@ -21,10 +22,13 @@ next_done_key=$(tmux show-option -gqv "@agent-next-done-key")
 [ -z "$next_done_key" ] && next_done_key=$(tmux show-option -gqv "@claude-next-done-key")
 wait_key=$(tmux show-option -gqv "@agent-wait-key")
 [ -z "$wait_key" ] && wait_key=$(tmux show-option -gqv "@claude-wait-key")
+park_key=$(tmux show-option -gqv "@agent-park-key")
+[ -z "$park_key" ] && park_key=$(tmux show-option -gqv "@claude-park-key")
 
 [ -z "$switcher_key" ] && switcher_key="$default_switcher_key"
 [ -z "$next_done_key" ] && next_done_key="$default_next_done_key"
 [ -z "$wait_key" ] && wait_key="$default_wait_key"
+[ -z "$park_key" ] && park_key="$default_park_key"
 
 # Set up custom session switcher with agent status (hook-based)
 tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
@@ -34,6 +38,9 @@ tmux bind-key "$next_done_key" run-shell "$CURRENT_DIR/scripts/next-done-project
 
 # Set up keybinding to put session in wait mode
 tmux bind-key "$wait_key" run-shell "$CURRENT_DIR/scripts/wait-session.sh"
+
+# Set up keybinding to park a session for later
+tmux bind-key "$park_key" run-shell "$CURRENT_DIR/scripts/park-session.sh"
 
 # Detect iTerm2 Control Mode (tmux -CC) and skip status polling / daemons
 # to avoid interfering with the control protocol. Keybindings above are fine.

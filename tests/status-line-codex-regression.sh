@@ -37,7 +37,7 @@ set -euo pipefail
 args="$*"
 
 case "$args" in
-    "-P 4242 -f codex")
+    "-P 4242")
         echo "5000"
         ;;
     "-P 5000 -f codex")
@@ -56,6 +56,31 @@ case "$args" in
 esac
 EOF
 chmod +x "$FAKE_BIN/pgrep"
+
+cat > "$FAKE_BIN/ps" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${1:-}" != "-p" ] || [ "${3:-}" != "-o" ] || [ "${4:-}" != "args=" ]; then
+    exit 1
+fi
+
+case "${2:-}" in
+    4242)
+        echo "-zsh"
+        ;;
+    5000)
+        echo "node /home/test/.nvm/versions/node/v24.12.0/bin/codex"
+        ;;
+    5001)
+        echo "/home/test/.nvm/versions/node/v24.12.0/lib/node_modules/@openai/codex/vendor/codex"
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+EOF
+chmod +x "$FAKE_BIN/ps"
 
 assert_eq() {
     local expected="$1"

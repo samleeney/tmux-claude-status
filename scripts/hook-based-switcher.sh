@@ -254,6 +254,11 @@ perform_full_reset() {
         fi
 
         if [ -f "$PARKED_DIR/${session_name}.parked" ]; then
+            if ! has_agent_in_session "$session_name"; then
+                # No agent running in parked session — stale park, clean up
+                rm -f "$PARKED_DIR/${session_name}.parked"
+                rm -f "$status_file"
+            fi
             continue
         fi
 
@@ -272,8 +277,9 @@ perform_full_reset() {
     "$SCRIPT_DIR/../smart-monitor.sh" stop >/dev/null 2>&1
     "$SCRIPT_DIR/../smart-monitor.sh" start >/dev/null 2>&1
 
-    # Restart daemon monitor
-    "$SCRIPT_DIR/daemon-monitor.sh" >/dev/null 2>&1 &
+    # Restart daemon monitor (fully detach so fzf reload doesn't hang)
+    "$SCRIPT_DIR/daemon-monitor.sh" </dev/null >/dev/null 2>&1 &
+    disown
 }
 
 # Handle --reset flag for full reset

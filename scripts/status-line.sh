@@ -124,6 +124,10 @@ check_agent_processes() {
                         ;;
                 esac
             fi
+        elif [ -f "$parked_file" ] && session_has_agent_process "$session"; then
+            # Parked session has an active agent (e.g. headless Claude -r) — unpark
+            rm -f "$parked_file"
+            echo "working" > "$status_file"
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 }

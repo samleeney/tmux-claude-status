@@ -97,15 +97,17 @@ check_agent_processes() {
         local parked_file="$PARKED_DIR/${session}.parked"
         local codex_pid=""
 
+        # Parking is an explicit user decision — never auto-unpark.
+        # Unparking only happens via user interaction (hook in better-hook.sh).
+        if [ -f "$parked_file" ]; then
+            continue
+        fi
+
         codex_pid=$(find_session_codex_pid "$session" 2>/dev/null)
 
         if [ -n "$codex_pid" ]; then
             local current_status
-            if [ -f "$parked_file" ]; then
-                current_status="parked"
-            else
-                current_status=$(cat "$status_file" 2>/dev/null)
-            fi
+            current_status=$(cat "$status_file" 2>/dev/null)
             if [ -z "$current_status" ]; then
                 # No status file yet - first detection, assume working
                 echo "working" > "$status_file"
@@ -116,10 +118,6 @@ check_agent_processes() {
                         ;;
                     "wait")
                         rm -f "$wait_file"
-                        echo "working" > "$status_file"
-                        ;;
-                    "parked")
-                        rm -f "$parked_file"
                         echo "working" > "$status_file"
                         ;;
                 esac

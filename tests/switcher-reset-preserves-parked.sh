@@ -39,7 +39,15 @@ case "${1:-}" in
         esac
         ;;
     list-panes)
-        exit 0
+        # Return a pane with pid 300 for the parked session
+        case "${5:-}" in
+            "#{pane_id}:#{pane_pid}")
+                echo "%0:300"
+                ;;
+            *)
+                exit 0
+                ;;
+        esac
         ;;
     *)
         exit 1
@@ -48,11 +56,42 @@ esac
 EOF
 chmod +x "$FAKE_BIN/tmux"
 
+# Simulate a running Claude agent in the session
 cat > "$FAKE_BIN/pgrep" <<'EOF'
 #!/usr/bin/env bash
-exit 1
+args="$*"
+case "$args" in
+    "-P 300")
+        echo "301"
+        ;;
+    "-P 301"*)
+        exit 1
+        ;;
+    *)
+        exit 1
+        ;;
+esac
 EOF
 chmod +x "$FAKE_BIN/pgrep"
+
+cat > "$FAKE_BIN/ps" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" != "-p" ] || [ "${3:-}" != "-o" ] || [ "${4:-}" != "args=" ]; then
+    exit 1
+fi
+case "${2:-}" in
+    300)
+        echo "-zsh"
+        ;;
+    301)
+        echo "claude --model opus"
+        ;;
+    *)
+        exit 1
+        ;;
+esac
+EOF
+chmod +x "$FAKE_BIN/ps"
 
 cat > "$FAKE_BIN/pkill" <<'EOF'
 #!/usr/bin/env bash

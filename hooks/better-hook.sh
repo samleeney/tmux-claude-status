@@ -44,18 +44,32 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         PARKED_FILE="$STATUS_DIR/parked/${TMUX_SESSION}.parked"
 
         case "$HOOK_TYPE" in
-            "UserPromptSubmit"|"PreToolUse")
-                # User submitted a prompt or Claude is calling a tool - cancel wait mode if active
+            "UserPromptSubmit")
+                # User submitted a prompt — this is an explicit interaction, so
+                # cancel wait mode and unpark.
                 if [ -f "$WAIT_FILE" ]; then
-                    rm -f "$WAIT_FILE"  # Remove wait timer
+                    rm -f "$WAIT_FILE"
                 fi
                 if [ -f "$PARKED_FILE" ]; then
                     rm -f "$PARKED_FILE"
                 fi
                 echo "working" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                fi
+                ;;
+            "PreToolUse")
+                # Agent is calling a tool — mark working but do NOT unpark.
+                # Parking is an explicit user decision; only user interaction
+                # (UserPromptSubmit) should unpark.
+                if [ -f "$WAIT_FILE" ]; then
+                    rm -f "$WAIT_FILE"
+                fi
+                if [ ! -f "$PARKED_FILE" ]; then
+                    echo "working" > "$STATUS_FILE"
+                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                        echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    fi
                 fi
                 ;;
             "Stop")

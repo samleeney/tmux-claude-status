@@ -30,8 +30,20 @@ park_key=$(tmux show-option -gqv "@agent-park-key")
 [ -z "$wait_key" ] && wait_key="$default_wait_key"
 [ -z "$park_key" ] && park_key="$default_park_key"
 
+# Display method: "popup" (default, requires tmux 3.2+) or "window" (fallback)
+display_method=$(tmux show-option -gqv "@agent-status-display-method")
+[ -z "$display_method" ] && display_method=$(tmux show-option -gqv "@claude-status-display-method")
+[ -z "$display_method" ] && display_method="popup"
+
 # Set up custom session switcher with agent status (hook-based)
-tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
+case "$display_method" in
+    "window")
+        tmux bind-key "$switcher_key" new-window -n "agent-status" "$CURRENT_DIR/scripts/window-wrapper.sh"
+        ;;
+    "popup"|*)
+        tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
+        ;;
+esac
 
 # Set up keybinding to switch to next done project
 tmux bind-key "$next_done_key" run-shell "$CURRENT_DIR/scripts/next-done-project.sh"

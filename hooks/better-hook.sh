@@ -44,18 +44,43 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         PARKED_FILE="$STATUS_DIR/parked/${TMUX_SESSION}.parked"
 
         case "$HOOK_TYPE" in
-            "UserPromptSubmit"|"PreToolUse")
-                # User submitted a prompt or Claude is calling a tool - cancel wait mode if active
+            "UserPromptSubmit")
+                # User submitted a prompt — explicit interaction, unpark and cancel wait
                 if [ -f "$WAIT_FILE" ]; then
-                    rm -f "$WAIT_FILE"  # Remove wait timer
+                    rm -f "$WAIT_FILE"
                 fi
                 if [ -f "$PARKED_FILE" ]; then
                     rm -f "$PARKED_FILE"
                 fi
                 echo "working" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                fi
+                ;;
+            "PreToolUse")
+                # Agent is calling a tool — check if it's asking the user a question
+                TOOL_NAME=$(echo "$JSON_INPUT" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tool_name"[[:space:]]*:[[:space:]]*"//;s/"//')
+                if [ -f "$WAIT_FILE" ]; then
+                    rm -f "$WAIT_FILE"
+                fi
+                if [ "$TOOL_NAME" = "AskUserQuestion" ]; then
+                    # Agent needs user input — distinct from "done" (agent stopped)
+                    if [ ! -f "$PARKED_FILE" ]; then
+                        echo "ask" > "$STATUS_FILE"
+                        if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                            echo "ask" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                        fi
+                        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+                        "$SCRIPT_DIR/../scripts/play-sound.sh" ask 2>/dev/null &
+                    fi
+                else
+                    # Normal tool use — mark working but don't unpark
+                    if [ ! -f "$PARKED_FILE" ]; then
+                        echo "working" > "$STATUS_FILE"
+                        if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                            echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                        fi
+                    fi
                 fi
                 ;;
             "Stop")
@@ -67,11 +92,13 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 fi
                 ;;
             "Notification")
-                # Claude is waiting for user input
-                echo "done" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
-                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                # Claude is waiting for user input — don't overwrite "ask" status
+                CURRENT_STATUS=$(cat "$STATUS_FILE" 2>/dev/null)
+                if [ "$CURRENT_STATUS" != "ask" ]; then
+                    echo "done" > "$STATUS_FILE"
+                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                        echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    fi
                 fi
 
                 # Play notification sound when Claude finishes

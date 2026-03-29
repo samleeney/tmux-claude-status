@@ -90,7 +90,7 @@ while IFS=: read -r name windows attached; do
     if [ "$has_agent" = true ]; then
         [ -z "$agent_status" ] && agent_status="done"
 
-        if [ "$agent_status" = "done" ] && [ "$name" != "$exclude_session" ]; then
+        if { [ "$agent_status" = "done" ] || [ "$agent_status" = "ask" ]; } && [ "$name" != "$exclude_session" ]; then
             # Get completion time from status file modification time
             status_file=""
             if is_ssh_session "$name"; then

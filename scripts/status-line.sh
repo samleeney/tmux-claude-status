@@ -135,6 +135,7 @@ check_agent_processes
 count_agent_status() {
     local working=0
     local waiting=0
+    local asking=0
     local done=0
     local total_agents=0
 
@@ -160,6 +161,7 @@ count_agent_status() {
                     "working") ((working++)); ((total_agents++)) ;;
                     "done") ((done++)); ((total_agents++)) ;;
                     "wait") ((waiting++)); ((total_agents++)) ;;
+                    "ask") ((asking++)); ((total_agents++)) ;;
                 esac
             fi
         elif [ -f "$remote_status_file" ] && ! is_ssh_session "$session"; then
@@ -186,12 +188,13 @@ count_agent_status() {
                     "working") ((working++)); ((total_agents++)) ;;
                     "done") ((done++)); ((total_agents++)) ;;
                     "wait") ((waiting++)); ((total_agents++)) ;;
+                    "ask") ((asking++)); ((total_agents++)) ;;
                 esac
             fi
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 
-    echo "$working:$waiting:$done:$total_agents"
+    echo "$working:$waiting:$asking:$done:$total_agents"
 }
 
 # Play notification sound
@@ -200,7 +203,7 @@ play_notification() {
 }
 
 # Get current status
-IFS=':' read -r working waiting done total_agents <<< "$(count_agent_status)"
+IFS=':' read -r working waiting asking done total_agents <<< "$(count_agent_status)"
 
 # Load previous status. Older versions stored only the working count; skip
 # notification diffing until we've written the new multi-count format once.
@@ -208,12 +211,12 @@ prev_done=""
 if [ -f "$LAST_STATUS_FILE" ]; then
     prev_status=$(cat "$LAST_STATUS_FILE" 2>/dev/null || echo "")
     if [[ "$prev_status" == *:* ]]; then
-        IFS=':' read -r _ _ prev_done <<< "$prev_status"
+        IFS=':' read -r _ _ _ prev_done <<< "$prev_status"
     fi
 fi
 
 # Save current status counts
-echo "$working:$waiting:$done" > "$LAST_STATUS_FILE"
+echo "$working:$waiting:$asking:$done" > "$LAST_STATUS_FILE"
 
 # Check if any agent just finished (done count increased)
 if [ -n "$prev_done" ] && [ "$done" -gt "$prev_done" ]; then
@@ -238,6 +241,15 @@ format_waiting_segment() {
     fi
 }
 
+format_asking_segment() {
+    local count="$1"
+    if [ "$count" -eq 1 ]; then
+        echo "#[fg=cyan,bold]? 1 asking#[default]"
+    else
+        echo "#[fg=cyan,bold]? $count asking#[default]"
+    fi
+}
+
 format_done_segment() {
     local count="$1"
     echo "#[fg=green]✓ $count done#[default]"
@@ -247,12 +259,13 @@ format_done_segment() {
 if [ "$total_agents" -eq 0 ]; then
     # No agent sessions
     echo ""
-elif [ "$working" -eq 0 ] && [ "$waiting" -eq 0 ] && [ "$done" -gt 0 ]; then
+elif [ "$working" -eq 0 ] && [ "$waiting" -eq 0 ] && [ "$asking" -eq 0 ] && [ "$done" -gt 0 ]; then
     # All agents are done
     echo "#[fg=green,bold]✓ All agents ready#[default]"
 else
     segments=()
     [ "$working" -gt 0 ] && segments+=("$(format_working_segment "$working")")
+    [ "$asking" -gt 0 ] && segments+=("$(format_asking_segment "$asking")")
     [ "$waiting" -gt 0 ] && segments+=("$(format_waiting_segment "$waiting")")
     [ "$done" -gt 0 ] && segments+=("$(format_done_segment "$done")")
     printf '%s\n' "${segments[*]}"

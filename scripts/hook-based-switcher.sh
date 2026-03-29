@@ -83,6 +83,7 @@ get_agent_status() {
 # Get all sessions with formatted output
 get_sessions_with_status() {
     local working_sessions=()
+    local ask_sessions=()
     local done_sessions=()
     local wait_sessions=()
     local parked_sessions=()
@@ -127,6 +128,13 @@ get_sessions_with_status() {
                     formatted_line=$(printf "%-20s %2s windows %-12s [working]" "$name" "$windows" "$attached")
                 fi
                 working_sessions+=("$formatted_line")
+            elif [ "$agent_status" = "ask" ]; then
+                if [ -n "$ssh_indicator" ]; then
+                    formatted_line=$(printf "%-20s %2s windows %-12s %s [asking]" "$name" "$windows" "$attached" "$ssh_indicator")
+                else
+                    formatted_line=$(printf "%-20s %2s windows %-12s [asking]" "$name" "$windows" "$attached")
+                fi
+                ask_sessions+=("$formatted_line")
             elif [ "$agent_status" = "wait" ]; then
                 # Calculate remaining wait time
                 local wait_file="$STATUS_DIR/wait/${name}.wait"
@@ -179,30 +187,37 @@ get_sessions_with_status() {
         printf '%s\n' "${working_sessions[@]}"
     fi
 
+    # Asking sessions (agent needs user input)
+    if [ ${#ask_sessions[@]} -gt 0 ]; then
+        [ ${#working_sessions[@]} -gt 0 ] && echo
+        echo -e "\033[1;36m ASKING \033[0m"
+        printf '%s\n' "${ask_sessions[@]}"
+    fi
+
     # Done sessions
     if [ ${#done_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#ask_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;32m DONE \033[0m"
         printf '%s\n' "${done_sessions[@]}"
     fi
 
     # Wait sessions
     if [ ${#wait_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#ask_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;36m WAIT \033[0m"
         printf '%s\n' "${wait_sessions[@]}"
     fi
 
     # Parked sessions
     if [ ${#parked_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#ask_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;35m PARKED \033[0m"
         printf '%s\n' "${parked_sessions[@]}"
     fi
 
     # No agent sessions
     if [ ${#no_agent_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] || [ ${#parked_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#ask_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] || [ ${#parked_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;90m NO AGENT \033[0m"
         printf '%s\n' "${no_agent_sessions[@]}"
     fi

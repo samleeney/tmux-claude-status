@@ -294,7 +294,7 @@ selected=$(echo "$sessions_with_reminder" | fzf \
     --ansi \
     --no-sort \
     --header="Sessions grouped by agent status | j/k: navigate | Enter: select | Esc: cancel | Ctrl-R: clear stale caches" \
-    --preview 'if echo {} | grep -q "━━━\|───"; then echo "Category separator"; else session=$(echo {} | awk "{print \$1}"); tmux capture-pane -pJ -t "$session" 2>/dev/null | cat -s || echo "No preview available"; fi' \
+    --preview "bash '$SCRIPT_DIR/preview-helper.sh' {}" \
     --preview-window=right:40% \
     --prompt="Session> " \
     --bind="j:down,k:up,ctrl-j:preview-down,ctrl-k:preview-up" \

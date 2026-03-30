@@ -52,26 +52,31 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 if [ -f "$PARKED_FILE" ]; then
                     rm -f "$PARKED_FILE"
                 fi
+                # Clear unread marker on user interaction
+                rm -f "$STATUS_DIR/${TMUX_SESSION}.unread" 2>/dev/null
                 echo "working" > "$STATUS_FILE"
                 # Only write to remote status file if we're in an SSH session
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                    rm -f "$STATUS_DIR/${TMUX_SESSION}-remote.unread" 2>/dev/null
                     echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
                 ;;
-            "Stop")
-                # Claude has finished responding (SubagentStop excluded - subagents finishing doesn't mean the main agent is done)
+            "Stop"|"Notification")
+                # Agent finished — mark done and check if session is unread
+                PREV_STATUS=$(cat "$STATUS_FILE" 2>/dev/null || echo "")
                 echo "done" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
-                ;;
-            "Notification")
-                # Claude is waiting for user input
-                echo "done" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
-                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                # Mark unread if transitioning from working and session is not attached
+                if [ "$PREV_STATUS" = "working" ]; then
+                    IS_ATTACHED=$(tmux list-sessions -F "#{session_name}:#{?session_attached,1,}" 2>/dev/null | grep "^${TMUX_SESSION}:1$")
+                    if [ -z "$IS_ATTACHED" ]; then
+                        : > "$STATUS_DIR/${TMUX_SESSION}.unread"
+                        if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                            : > "$STATUS_DIR/${TMUX_SESSION}-remote.unread"
+                        fi
+                    fi
                 fi
 
                 # Play notification sound when Claude finishes

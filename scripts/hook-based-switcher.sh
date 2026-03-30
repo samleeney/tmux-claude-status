@@ -83,6 +83,7 @@ get_agent_status() {
 # Get all sessions with formatted output
 get_sessions_with_status() {
     local working_sessions=()
+    local unread_sessions=()
     local done_sessions=()
     local wait_sessions=()
     local parked_sessions=()
@@ -153,6 +154,13 @@ get_sessions_with_status() {
                     formatted_line=$(printf "%-20s %2s windows %-12s [parked]" "$name" "$windows" "$attached")
                 fi
                 parked_sessions+=("$formatted_line")
+            elif [ -f "$STATUS_DIR/${name}.unread" ] || [ -f "$STATUS_DIR/${name}-remote.unread" ]; then
+                if [ -n "$ssh_indicator" ]; then
+                    formatted_line=$(printf "%-20s %2s windows %-12s %s [unread]" "$name" "$windows" "$attached" "$ssh_indicator")
+                else
+                    formatted_line=$(printf "%-20s %2s windows %-12s [unread]" "$name" "$windows" "$attached")
+                fi
+                unread_sessions+=("$formatted_line")
             else
                 if [ -n "$ssh_indicator" ]; then
                     formatted_line=$(printf "%-20s %2s windows %-12s %s [done]" "$name" "$windows" "$attached" "$ssh_indicator")
@@ -179,30 +187,37 @@ get_sessions_with_status() {
         printf '%s\n' "${working_sessions[@]}"
     fi
 
+    # Unread sessions (finished while you were away)
+    if [ ${#unread_sessions[@]} -gt 0 ]; then
+        [ ${#working_sessions[@]} -gt 0 ] && echo
+        echo -e "\033[1;35m UNREAD \033[0m"
+        printf '%s\n' "${unread_sessions[@]}"
+    fi
+
     # Done sessions
     if [ ${#done_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#unread_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;32m DONE \033[0m"
         printf '%s\n' "${done_sessions[@]}"
     fi
 
     # Wait sessions
     if [ ${#wait_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#unread_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;36m WAIT \033[0m"
         printf '%s\n' "${wait_sessions[@]}"
     fi
 
     # Parked sessions
     if [ ${#parked_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#unread_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;35m PARKED \033[0m"
         printf '%s\n' "${parked_sessions[@]}"
     fi
 
     # No agent sessions
     if [ ${#no_agent_sessions[@]} -gt 0 ]; then
-        [ ${#working_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] || [ ${#parked_sessions[@]} -gt 0 ] && echo
+        [ ${#working_sessions[@]} -gt 0 ] || [ ${#unread_sessions[@]} -gt 0 ] || [ ${#done_sessions[@]} -gt 0 ] || [ ${#wait_sessions[@]} -gt 0 ] || [ ${#parked_sessions[@]} -gt 0 ] && echo
         echo -e "\033[1;90m NO AGENT \033[0m"
         printf '%s\n' "${no_agent_sessions[@]}"
     fi
@@ -305,5 +320,8 @@ selected=$(echo "$sessions_with_reminder" | fzf \
 # Switch to selected session (skip separator lines)
 if [ -n "$selected" ] && ! echo "$selected" | grep -q "━━━\|───"; then
     session_name=$(echo "$selected" | awk '{print $1}')
+    # Clear unread markers when switching to a session
+    rm -f "$STATUS_DIR/${session_name}.unread" 2>/dev/null
+    rm -f "$STATUS_DIR/${session_name}-remote.unread" 2>/dev/null
     tmux switch-client -t "$session_name"
 fi

@@ -176,16 +176,20 @@ collect() {
     declare -A sess_cwd
     declare -A pane_to_session   # pane_pid → session
     declare -A pane_to_id        # pane_pid → pane_id (e.g. %5)
+    declare -A pane_to_window    # pane_id → window_index
+    declare -A window_names      # session:window_index → window_name
     local all_pane_pids=""
 
     local _tab=$'\t'
-    while IFS=$'\t' read -r sname pane_id pcwd ppid; do
+    while IFS=$'\t' read -r sname pane_id pcwd ppid win_idx win_name; do
         [ -z "$sname" ] && continue
 
         # Pane data
         [[ -z "${sess_cwd[$sname]:-}" ]] && sess_cwd[$sname]="$pcwd"
         pane_to_session[$ppid]="$sname"
         pane_to_id[$ppid]="$pane_id"
+        pane_to_window[$pane_id]="$win_idx"
+        window_names["${sname}:${win_idx}"]="$win_name"
         all_pane_pids+="$ppid "
 
         # Session status (first pane per session)
@@ -224,7 +228,7 @@ collect() {
         sess_state[$sname]="$state"
         sess_extra[$sname]="$extra"
         sess_ssh[$sname]="$is_ssh"
-    done < <(tmux list-panes -a -F "#{session_name}${_tab}#{pane_id}${_tab}#{pane_current_path}${_tab}#{pane_pid}" 2>/dev/null)
+    done < <(tmux list-panes -a -F "#{session_name}${_tab}#{pane_id}${_tab}#{pane_current_path}${_tab}#{pane_pid}${_tab}#{window_index}${_tab}#{window_name}" 2>/dev/null)
 
     # ── 3. Worktree detection ────────────────────────────────────
     # session → parent session name
@@ -412,71 +416,101 @@ collect() {
         done
     }
 
-    # Helper: append a session + its children + agent panes to ENTRIES.
+    # Helper: emit agent panes for a session, grouped by window when needed.
+    # Rules: 0-1 agents → nothing. 2+ agents, 1 window → flat P. 2+ agents, 2+ windows → P(window) + Q(pane).
+    _emit_agents() {
+        local sname="$1"
+        _get_agent_arr "$sname"
+        local agents=("${_agent_result[@]}")
+        (( ${#agents[@]} <= 1 )) && return
+
+        # Group by window
+        local -A win_agents=() win_seen=()
+        local -a win_order=()
+        for ap in "${agents[@]}"; do
+            local pid="${ap%%:*}"
+            local wi="${pane_to_window[$pid]:-0}"
+            [[ -z "${win_seen[$wi]:-}" ]] && { win_order+=("$wi"); win_seen[$wi]=1; }
+            win_agents[$wi]+="$ap "
+        done
+
+        if (( ${#win_order[@]} == 1 )); then
+            # Single window — flat panes under session, skip window header
+            local ai=0 total=${#agents[@]}
+            for ap in "${agents[@]}"; do
+                ((ai++))
+                local pid="${ap%%:*}" r="${ap#*:}"
+                local agent="${r%%:*}" st="${r#*:}"
+                ENTRIES+=("P|${sname}|${pid}|${agent}|${st}|$((ai==total))")
+                SEL_NAMES+=("${sname}:${pid}")
+                SEL_TYPES+=("P")
+            done
+        else
+            # Multiple windows
+            local nw=${#win_order[@]} wi=0
+            for widx in "${win_order[@]}"; do
+                ((wi++))
+                local wname="${window_names[${sname}:${widx}]:-window-$widx}"
+                local w_last=$((wi==nw))
+                # Count panes in this window
+                local pc=0
+                for _ in ${win_agents[$widx]}; do ((pc++)); done
+
+                if (( pc == 1 )); then
+                    # 1 agent in window — show window as leaf with agent's status
+                    local ap="${win_agents[$widx]%% *}"
+                    local pid="${ap%%:*}" r="${ap#*:}"
+                    local st="${r#*:}"
+                    ENTRIES+=("P|${sname}|${pid}|${wname}|${st}|${w_last}")
+                    SEL_NAMES+=("${sname}:${pid}")
+                    SEL_TYPES+=("P")
+                else
+                    # 2+ agents — window header + nested panes
+                    local best_pri=-1 best_st="noagent"
+                    for wap in ${win_agents[$widx]}; do
+                        local ws="${wap#*:}"; ws="${ws#*:}"
+                        local wp; wp=$(_state_pri "$ws" 2>/dev/null || echo 0)
+                        (( wp > best_pri )) && { best_pri=$wp; best_st="$ws"; }
+                    done
+                    ENTRIES+=("P|${sname}|w${widx}|${wname}|${best_st}|${w_last}")
+                    SEL_NAMES+=("${sname}:w${widx}")
+                    SEL_TYPES+=("P")
+                    local ai=0
+                    for wap in ${win_agents[$widx]}; do
+                        ((ai++))
+                        local pid="${wap%%:*}" r="${wap#*:}"
+                        local agent="${r%%:*}" st="${r#*:}"
+                        ENTRIES+=("Q|${sname}|${pid}|${agent}|${st}|$((ai==pc))|${w_last}")
+                        SEL_NAMES+=("${sname}:${pid}")
+                        SEL_TYPES+=("P")
+                    done
+                fi
+            done
+        fi
+    }
+
+    # Helper: append a session + its children to ENTRIES.
     _emit_session() {
-        local entry="$1"
-        local sname="$2"
+        local entry="$1" sname="$2"
         ENTRIES+=("$entry")
         SEL_NAMES+=("$sname")
         SEL_TYPES+=("S")
 
+        # Worktree children
         local wt_list="${worktree_children[$sname]:-}"
-
-        # Agent panes for this session (only show if > 1)
-        _get_agent_arr "$sname"
-        local agent_arr=("${_agent_result[@]}")
-        local show_agents=0
-        (( ${#agent_arr[@]} > 1 )) && show_agents=1
-
         local wt_names=()
         for wt in $wt_list; do wt_names+=("$wt"); done
-        local total_children=$(( ${#wt_names[@]} + (show_agents == 1 ? ${#agent_arr[@]} : 0) ))
-        local child_idx=0
-
-        # Emit worktree children
+        local wi=0
         for wt in "${wt_names[@]}"; do
-            ((child_idx++))
-            local wst="${sess_state[$wt]}"
-            local wex="${sess_extra[$wt]}"
-            local wss="${sess_ssh[$wt]}"
-            local is_last=0
-            (( child_idx == total_children )) && is_last=1
-            ENTRIES+=("W|${wt}|${wst}|${wex}|${wss}|${is_last}")
+            ((wi++))
+            local is_last=$((wi==${#wt_names[@]}))
+            ENTRIES+=("W|${wt}|${sess_state[$wt]}|${sess_extra[$wt]}|${sess_ssh[$wt]}|${is_last}")
             SEL_NAMES+=("$wt")
             SEL_TYPES+=("W")
-
-            # Agent panes within this worktree child
-            _get_agent_arr "$wt"
-            local wt_agent_arr=("${_agent_result[@]}")
-            if (( ${#wt_agent_arr[@]} > 1 )); then
-                local wai=0
-                for wap in "${wt_agent_arr[@]}"; do
-                    ((wai++))
-                    local wpane_id="${wap%%:*}"; local wr="${wap#*:}"
-                    local wagent="${wr%%:*}"; local wstatus="${wr#*:}"
-                    local wis_last=0
-                    (( wai == ${#wt_agent_arr[@]} )) && wis_last=1
-                    ENTRIES+=("Q|${wt}|${wpane_id}|${wagent} #${wai}|${wstatus}|${wis_last}|${is_last}")
-                    SEL_NAMES+=("${wt}:${wpane_id}")
-                    SEL_TYPES+=("P")
-                done
-            fi
+            _emit_agents "$wt"
         done
 
-        # Emit agent panes for the parent session (only if multi-agent)
-        if (( show_agents )); then
-            local ai=0
-            for ap in "${agent_arr[@]}"; do
-                ((ai++))
-                local pane_id="${ap%%:*}"; local ar="${ap#*:}"
-                local agent="${ar%%:*}"; local pstatus="${ar#*:}"
-                local is_last=0
-                (( child_idx + ai == total_children )) && is_last=1
-                ENTRIES+=("P|${sname}|${pane_id}|${agent} #${ai}|${pstatus}|${is_last}")
-                SEL_NAMES+=("${sname}:${pane_id}")
-                SEL_TYPES+=("P")
-            done
-        fi
+        _emit_agents "$sname"
     }
 
     # ── INBOX: panes/sessions with status "done" that need action ──
@@ -989,17 +1023,17 @@ render() {
             if (( is_sel )); then
                 pad=$((LW - vlen - 11))
                 (( pad < 0 )) && pad=0
-                buf+="${SEL_BG}     ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
+                buf+="${SEL_BG}   ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 11))
                 (( pad < 0 )) && pad=0
-                buf+="${CUR_BG}     ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
+                buf+="${CUR_BG}   ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
                 pad=$((LW - ${#agent} - 10))
                 (( pad < 0 )) && pad=0
-                buf+="      ${DIM}${vert} ${tree} ${agent}${RST}"
+                buf+="    ${DIM}${vert} ${tree} ${agent}${RST}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             fi
         fi
@@ -1095,11 +1129,19 @@ action_switch() {
     if [[ "$ttype" == "P" ]]; then
         local sess="${target%%:*}"
         local pane_id="${target#*:}"
-        local win
-        win=$(tmux display-message -t "$pane_id" -p '#{window_index}' 2>/dev/null)
-        tmux switch-client -t "$sess" 2>/dev/null
-        [ -n "$win" ] && tmux select-window -t "$sess:$win" 2>/dev/null
-        tmux select-pane -t "$pane_id" 2>/dev/null
+        if [[ "$pane_id" == w* ]]; then
+            # Window entry — switch to session and select window
+            local win_idx="${pane_id#w}"
+            tmux switch-client -t "$sess" 2>/dev/null
+            tmux select-window -t "$sess:$win_idx" 2>/dev/null
+        else
+            # Pane entry — switch to session, window, and pane
+            local win
+            win=$(tmux display-message -t "$pane_id" -p '#{window_index}' 2>/dev/null)
+            tmux switch-client -t "$sess" 2>/dev/null
+            [ -n "$win" ] && tmux select-window -t "$sess:$win" 2>/dev/null
+            tmux select-pane -t "$pane_id" 2>/dev/null
+        fi
     else
         tmux switch-client -t "$target" 2>/dev/null
     fi

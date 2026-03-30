@@ -79,7 +79,7 @@ fi
 
 # Set up daemon monitor to ensure smart-monitor is always running
 # Start daemon monitor on session created
-tmux set-hook -g session-created "run-shell '$CURRENT_DIR/scripts/daemon-monitor.sh'"
+tmux set-hook -ga session-created "run-shell '$CURRENT_DIR/scripts/daemon-monitor.sh'"
 
 # Auto-create sidebar in new sessions (small delay so the session is ready)
 tmux set-hook -ga session-created "run-shell -b 'sleep 0.5 && $CURRENT_DIR/scripts/sidebar-toggle.sh'"

@@ -33,12 +33,14 @@ fi
 # ─── State ────────────────────────────────────────────────────────
 SELECTED=0
 SCROLL_OFFSET=0
+SESS_START=0  # index in SEL_NAMES where SESSIONS section begins
 SEARCH_QUERY=""
 SEARCH_ACTIVE=0
 
 # Cached values from collect(), used by render().
 CUR_SESSION=""
 CUR_PANE=""
+
 
 # Screen row (1-based) → selectable index. Populated by render().
 declare -a SCREEN_SEL=()
@@ -52,6 +54,8 @@ _LAST_STATUS_MTIME=""
 #   "W|<name>|<state>|<extra>|<ssh>|<is_last>"   — worktree child (selectable)
 #   "P|<session>|<pane_id>|<agent>|<status>|<is_last>" — agent pane (selectable)
 ENTRIES=()
+# Per-session pane counts: session → "working:done:wait" (only for multi-agent sessions)
+declare -A PANE_COUNTS=()
 
 # Parallel arrays for selectable items.
 SEL_NAMES=()     # session name (for S/W) or "session:pane_id" (for P)
@@ -72,6 +76,11 @@ WAIT_INPUT_BUF=""
 # Spinner for working sessions (cycles each render).
 SPINNER_FRAMES=('⣾' '⣽' '⣻' '⢿' '⡿' '⣟' '⣯' '⣷')
 SPINNER_TICK=0
+
+# Preview cache — only re-capture when selection or data changes.
+_PREVIEW_SEL=""
+_PREVIEW_LINES=()
+_PREVIEW_DIRTY=1
 
 # ─── ANSI helpers ─────────────────────────────────────────────────
 RST=$'\033[0m'
@@ -331,6 +340,25 @@ collect() {
         sess_state[$sname]="$best_st"
     done
 
+    # ── 5b. Compute per-session pane counts ─────────────────────
+    PANE_COUNTS=()
+    for sname in "${!sess_agents[@]}"; do
+        local agents="${sess_agents[$sname]}"
+        local pw=0 pd=0 pwt=0 count=0
+        local seen=""
+        for ap in $agents; do
+            local pid="${ap%%:*}"
+            [[ " $seen " == *" $pid "* ]] && continue
+            seen+="$pid "
+            local rest="${ap#*:}"; local ps="${rest#*:}"
+            case "$ps" in
+                working) ((pw++)) ;; done) ((pd++)) ;; wait) ((pwt++)) ;;
+            esac
+            ((count++))
+        done
+        (( count > 1 )) && PANE_COUNTS[$sname]="${pw}:${pd}:${pwt}"
+    done
+
     # ── 6. Collapse single-worktree parents ────────────────────
     # Only nest worktrees when a parent has 2+ children.
     for parent in "${!worktree_children[@]}"; do
@@ -367,25 +395,6 @@ collect() {
     done
 
     # ── 8. Build ENTRIES ─────────────────────────────────────────
-    local done_arr=() working=() waiting=() parked=() noagent=()
-
-    for sname in "${!sess_state[@]}"; do
-        # Skip worktree children — they'll be added under their parent.
-        [[ -n "${worktree_parent[$sname]:-}" ]] && continue
-
-        local st="${eff_state[$sname]}"
-        local ex="${sess_extra[$sname]}"
-        local ss="${sess_ssh[$sname]}"
-        local entry="S|${sname}|${st}|${ex}|${ss}"
-
-        case "$st" in
-            done)    done_arr+=("$entry") ;;
-            working) working+=("$entry") ;;
-            wait)    waiting+=("$entry") ;;
-            parked)  parked+=("$entry") ;;
-            *)       noagent+=("$entry") ;;
-        esac
-    done
 
     # Helper: parse sess_agents into a deduplicated array.
     # Format: "pane_id:agent_name:status ..."
@@ -470,36 +479,81 @@ collect() {
         fi
     }
 
-    # Build final ENTRIES with group headers
-    local -a groups=(
-        "done_arr|DONE|$BGRN"
-        "working|WORKING|$BYEL"
-        "waiting|WAIT|$BCYN"
-        "parked|PARKED|${DIM}${MAG}"
-        "noagent|NO AGENT|$GRY"
-    )
-
-    for g in "${groups[@]}"; do
-        local key="${g%%|*}"
-        local rest="${g#*|}"
-        local label="${rest%%|*}"
-        local color="${rest#*|}"
-
-        local -n arr="$key"
-        if (( ${#arr[@]} > 0 )); then
-            ENTRIES+=("G|${label}|${color}")
-            for entry in "${arr[@]}"; do
-                local sname="${entry#S|}"
-                sname="${sname%%|*}"
-                _emit_session "$entry" "$sname"
-            done
-        fi
+    # ── INBOX: panes/sessions with status "done" that need action ──
+    local inbox=()
+    # Multi-agent sessions: each done pane is an inbox item
+    for sname in "${!sess_agents[@]}"; do
+        [[ -f "$PARKED_DIR/${sname}.parked" ]] && continue
+        _get_agent_arr "$sname"
+        local arr_copy=("${_agent_result[@]}")
+        local agent_count=${#arr_copy[@]}
+        local ai=0
+        for ap in "${arr_copy[@]}"; do
+            ((ai++))
+            local pid="${ap%%:*}"; local rest="${ap#*:}"
+            local agent_name="${rest%%:*}"; local pstatus="${rest#*:}"
+            if [[ "$pstatus" == "done" ]]; then
+                if (( agent_count > 1 )); then
+                    # I|session|pane_id|label|status
+                    inbox+=("I|${sname}|${pid}|${sname} › ${agent_name} #${ai}|${pstatus}")
+                else
+                    inbox+=("I|${sname}||${sname}|${pstatus}")
+                fi
+            fi
+        done
     done
+    # Single-agent sessions (not in sess_agents) with done status
+    for sname in "${!sess_state[@]}"; do
+        [[ -n "${sess_agents[$sname]:-}" ]] && continue
+        [[ -f "$PARKED_DIR/${sname}.parked" ]] && continue
+        [[ -n "${worktree_parent[$sname]:-}" ]] && continue
+        local st="${eff_state[$sname]}"
+        [[ "$st" == "done" ]] && inbox+=("I|${sname}||${sname}|done")
+    done
+
+    if (( ${#inbox[@]} > 0 )); then
+        # Sort inbox entries by label for consistency
+        IFS=$'\n' inbox=($(sort -t'|' -k4 <<< "${inbox[*]}")); unset IFS
+        ENTRIES+=("G|INBOX|$BGRN")
+        for entry in "${inbox[@]}"; do
+            ENTRIES+=("$entry")
+            local r="${entry#I|}"
+            local sname="${r%%|*}"; r="${r#*|}"
+            local pid="${r%%|*}"
+            if [[ -n "$pid" ]]; then
+                SEL_NAMES+=("${sname}:${pid}")
+                SEL_TYPES+=("P")
+            else
+                SEL_NAMES+=("$sname")
+                SEL_TYPES+=("S")
+            fi
+        done
+    fi
+
+    # ── SESSIONS: all sessions sorted alphabetically ──────────────
+    local sorted_sessions=()
+    for sname in "${!sess_state[@]}"; do
+        [[ -n "${worktree_parent[$sname]:-}" ]] && continue
+        sorted_sessions+=("$sname")
+    done
+    IFS=$'\n' sorted_sessions=($(sort <<< "${sorted_sessions[*]}")); unset IFS
+
+    SESS_START=${#SEL_NAMES[@]}
+    if (( ${#sorted_sessions[@]} > 0 )); then
+        ENTRIES+=("G|SESSIONS|$GRY")
+        for sname in "${sorted_sessions[@]}"; do
+            local st="${eff_state[$sname]}"
+            local ex="${sess_extra[$sname]}"
+            local ss="${sess_ssh[$sname]}"
+            local entry="S|${sname}|${st}|${ex}|${ss}"
+            _emit_session "$entry" "$sname"
+        done
+    fi
 
     SEL_COUNT=${#SEL_NAMES[@]}
     (( SEL_COUNT == 0 )) && SELECTED=0
     (( SELECTED >= SEL_COUNT )) && SELECTED=$((SEL_COUNT - 1))
-    (( SELECTED < 0 )) && SELECTED=0
+    (( SELECTED < SESS_START )) && SELECTED=$SESS_START
 
     _collect_cur_client
 }
@@ -521,15 +575,22 @@ render() {
         preview_width=$((W - LW - 2))
     fi
 
-    # Count by state for the header (only S and W entries count)
+    # Count by state for the header (per-pane when multi-agent)
     local nw=0 nd=0 nwt=0
     for e in "${ENTRIES[@]}"; do
         [[ "$e" != S\|* && "$e" != W\|* ]] && continue
-        local rest="${e#?|}" ; rest="${rest#*|}"
+        local rest="${e#?|}"
+        local sname="${rest%%|*}"; rest="${rest#*|}"
         local st="${rest%%|*}"
-        case "$st" in
-            working) ((nw++)) ;; done) ((nd++)) ;; wait) ((nwt++)) ;;
-        esac
+        local counts="${PANE_COUNTS[$sname]:-}"
+        if [[ -n "$counts" ]]; then
+            IFS=: read -r _pw _pd _pwt <<< "$counts"
+            ((nw += _pw)); ((nd += _pd)); ((nwt += _pwt))
+        else
+            case "$st" in
+                working) ((nw++)) ;; done) ((nd++)) ;; wait) ((nwt++)) ;;
+            esac
+        fi
     done
 
     local cur_session="$CUR_SESSION"
@@ -543,7 +604,7 @@ render() {
         buf+=" ${BOLD}/${RST}${SEARCH_QUERY}${DIM}▏${RST}\033[K\n"
     else
         local total=$((nw + nd + nwt))
-        buf+=" ${BOLD}Sessions${RST} ${DIM}${total}${RST}  "
+        buf+=" ${BOLD}Agents${RST} ${DIM}${total}${RST}  "
         (( nd > 0 ))  && buf+="${BGRN}● ${nd}${RST} "
         (( nw > 0 ))  && buf+="${BYEL}● ${nw}${RST} "
         (( nwt > 0 )) && buf+="${BCYN}● ${nwt}${RST} "
@@ -587,6 +648,7 @@ render() {
             case "$etype" in
                 S|W) local r="${entry#?|}"; match_name="${r%%|*}" ;;
                 P|Q) local r="${entry#?|}"; match_name="${r%%|*}"; r="${r#*|}"; r="${r#*|}"; match_name+=" ${r%%|*}" ;;
+                I) local r="${entry#I|}"; r="${r#*|}"; r="${r#*|}"; match_name="${r%%|*}" ;;
             esac
             if ! _fuzzy_match "$SEARCH_QUERY" "$match_name"; then
                 ((sel_idx++))
@@ -623,7 +685,7 @@ render() {
     local sel_render_idx=-1
     for ((i=0; i<total_render; i++)); do
         local rt="${render_types[$i]}"
-        if [[ "$rt" == "S" || "$rt" == "W" || "$rt" == "P" || "$rt" == "Q" ]] \
+        if [[ "$rt" == "S" || "$rt" == "W" || "$rt" == "P" || "$rt" == "Q" || "$rt" == "I" ]] \
             && (( ${render_sel_indices[$i]} == SELECTED )); then
             sel_render_idx=$i
             break
@@ -689,6 +751,26 @@ render() {
             esac
         }
 
+        # Build compact multi-status string from pane counts "w:d:wt"
+        _render_counts() {
+            IFS=: read -r _cw _cd _cwt <<< "$1"
+            _count_str="" ; _count_vlen=0
+            if (( _cw > 0 )); then
+                _count_str+="${YEL}${SPINNER_FRAMES[$SPINNER_TICK]}${_cw}${RST}"
+                ((_count_vlen += ${#_cw} + 1))
+            fi
+            if (( _cd > 0 )); then
+                (( _count_vlen > 0 )) && { _count_str+=" "; ((_count_vlen++)); }
+                _count_str+="${GRN}✓${_cd}${RST}"
+                ((_count_vlen += ${#_cd} + 1))
+            fi
+            if (( _cwt > 0 )); then
+                (( _count_vlen > 0 )) && { _count_str+=" "; ((_count_vlen++)); }
+                _count_str+="${CYN}⏸${_cwt}${RST}"
+                ((_count_vlen += ${#_cwt} + 1))
+            fi
+        }
+
         if [[ "$rtype" == "S" ]]; then
             local rest="${entry#S|}"
             local name="${rest%%|*}"; rest="${rest#*|}"
@@ -697,8 +779,18 @@ render() {
             local ssh="$rest"
             [[ "$name" == "$cur_session" && -z "${_active_pane_in_child[$name]:-}" ]] && is_cur=1
 
-            local _icon _ic; _set_icon_color "$state"
-            local max_n=$((LW - 6))
+            # Build status indicator: compact counts or single icon
+            local icon_str icon_vlen
+            local counts="${PANE_COUNTS[$name]:-}"
+            if [[ -n "$counts" ]]; then
+                _render_counts "$counts"
+                icon_str="$_count_str"; icon_vlen=$_count_vlen
+            else
+                local _icon _ic; _set_icon_color "$state"
+                icon_str="${_ic}${_icon}${RST}"; icon_vlen=1
+            fi
+
+            local max_n=$((LW - 5 - icon_vlen))
             (( max_n < 4 )) && max_n=4
             local dname="$name"
             (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
@@ -715,20 +807,20 @@ render() {
             local pad
 
             if (( is_sel )); then
-                pad=$((LW - vlen - 5))
+                pad=$((LW - vlen - 4 - icon_vlen))
                 (( pad < 0 )) && pad=0
                 buf+="${SEL_BG} ${BOLD}▸ ${RST}${SEL_BG}${dname}${suffix}${active_tag}${SEL_BG}"
-                buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
+                buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             elif (( is_cur )); then
-                pad=$((LW - vlen - 5))
+                pad=$((LW - vlen - 4 - icon_vlen))
                 (( pad < 0 )) && pad=0
                 buf+="${CUR_BG} ${ACC_GRN}▌${RST}${CUR_BG} ${dname}${suffix}${active_tag}${CUR_BG}"
-                buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
+                buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             else
-                pad=$((LW - vlen - 4))
+                pad=$((LW - vlen - 3 - icon_vlen))
                 (( pad < 0 )) && pad=0
                 buf+="  ${dname}${suffix}"
-                buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
+                buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             fi
 
         elif [[ "$rtype" == "W" ]]; then
@@ -740,9 +832,19 @@ render() {
             local is_last="$rest"
             [[ "$name" == "$cur_session" && -z "${_active_pane_in_child[$name]:-}" ]] && is_cur=1
 
-            local _icon _ic; _set_icon_color "$state"
+            # Build status indicator: compact counts or single icon
+            local icon_str icon_vlen
+            local counts="${PANE_COUNTS[$name]:-}"
+            if [[ -n "$counts" ]]; then
+                _render_counts "$counts"
+                icon_str="$_count_str"; icon_vlen=$_count_vlen
+            else
+                local _icon _ic; _set_icon_color "$state"
+                icon_str="${_ic}${_icon}${RST}"; icon_vlen=1
+            fi
+
             local tree="├"; [[ "$is_last" == "1" ]] && tree="└"
-            local max_n=$((LW - 10))
+            local max_n=$((LW - 9 - icon_vlen))
             (( max_n < 4 )) && max_n=4
             local dname="$name"
             (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
@@ -757,19 +859,65 @@ render() {
             local pad
 
             if (( is_sel )); then
-                pad=$((LW - vlen - 9))
+                pad=$((LW - vlen - 8 - icon_vlen))
                 (( pad < 0 )) && pad=0
                 buf+="${SEL_BG}   ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${dname}${suffix}${active_tag}${SEL_BG}"
-                buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
+                buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             elif (( is_cur )); then
-                pad=$((LW - vlen - 9))
+                pad=$((LW - vlen - 8 - icon_vlen))
                 (( pad < 0 )) && pad=0
                 buf+="${CUR_BG}   ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${dname}${suffix}${active_tag}${CUR_BG}"
-                buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
+                buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             else
-                pad=$((LW - vlen - 8))
+                pad=$((LW - vlen - 7 - icon_vlen))
                 (( pad < 0 )) && pad=0
                 buf+="    ${DIM}${tree}${RST} ${dname}${suffix}"
+                buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
+            fi
+
+        elif [[ "$rtype" == "I" ]]; then
+            # Inbox item: I|session|pane_id|label|status
+            local rest="${entry#I|}"
+            local sess="${rest%%|*}"; rest="${rest#*|}"
+            local pane_id="${rest%%|*}"; rest="${rest#*|}"
+            local label="${rest%%|*}"; rest="${rest#*|}"
+            local istatus="$rest"
+            if [[ -n "$pane_id" ]]; then
+                [[ "$sess" == "$cur_session" && "$pane_id" == "$cur_pane" ]] && is_cur=1
+            else
+                [[ "$sess" == "$cur_session" ]] && is_cur=1
+            fi
+            # Mirror selection from SESSIONS section
+            local sel_name="${SEL_NAMES[$SELECTED]:-}"
+            [[ "$sess" == "$sel_name" || "$sess" == "${sel_name%%:*}" ]] && is_sel=1
+
+            local _icon _ic; _set_icon_color "$istatus"
+            local max_n=$((LW - 6))
+            (( max_n < 4 )) && max_n=4
+            local dlabel="$label"
+            (( ${#dlabel} > max_n )) && dlabel="${dlabel:0:$((max_n-1))}…"
+
+            local active_tag=""
+            local tag_vlen=0
+            (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
+
+            local vlen=$(( ${#dlabel} + tag_vlen ))
+            local pad
+
+            if (( is_sel )); then
+                pad=$((LW - vlen - 5))
+                (( pad < 0 )) && pad=0
+                buf+="${SEL_BG} ${BOLD}▸ ${RST}${SEL_BG}${dlabel}${active_tag}${SEL_BG}"
+                buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
+            elif (( is_cur )); then
+                pad=$((LW - vlen - 5))
+                (( pad < 0 )) && pad=0
+                buf+="${CUR_BG} ${ACC_GRN}▌${RST}${CUR_BG} ${dlabel}${active_tag}${CUR_BG}"
+                buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
+            else
+                pad=$((LW - vlen - 4))
+                (( pad < 0 )) && pad=0
+                buf+="  ${dlabel}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             fi
 
@@ -872,36 +1020,42 @@ render() {
         local sel_type="${SEL_TYPES[$SELECTED]}"
         [[ "$sel_type" == "P" ]] && sel_session="${sel_session%%:*}"
 
+        # Only re-capture pane content when selection or data changed
+        local sel_key="${sel_session}:${sel_type}"
+        if [[ "$sel_key" != "$_PREVIEW_SEL" ]] || (( _PREVIEW_DIRTY )); then
+            _PREVIEW_SEL="$sel_key"
+            _PREVIEW_DIRTY=0
+            _PREVIEW_LINES=()
+
+            local pane_target="$sel_session"
+            if [[ "$sel_type" == "P" ]]; then
+                local pane_id="${SEL_NAMES[$SELECTED]#*:}"
+                pane_target="$pane_id"
+            fi
+
+            while IFS= read -r pline; do
+                _PREVIEW_LINES+=("$pline")
+            done < <(tmux capture-pane -peJ -t "$pane_target" 2>/dev/null | tail -$((H - 4)))
+        fi
+
         # Separator + preview title
         local pbuf=""
         local row
         for ((row=1; row<=H; row++)); do
             pbuf+="\033[${row};$((LW+1))H${DIM}│${RST}"
         done
-        pbuf+="\033[1;${preview_col}H ${BOLD}${sel_session}${RST}"
+        pbuf+="\033[1;${preview_col}H ${BOLD}${sel_session}${RST}\033[K"
 
         # Separator line under preview title
         pbuf+="\033[2;${preview_col}H${DIM}"
         for ((i=0; i<preview_width; i++)); do pbuf+="─"; done
         pbuf+="${RST}"
 
-        # Capture selected session's pane content
-        local pane_target="$sel_session"
-        if [[ "$sel_type" == "P" ]]; then
-            local pane_id="${SEL_NAMES[$SELECTED]#*:}"
-            pane_target="$pane_id"
-        fi
-
-        local -a plines=()
-        while IFS= read -r pline; do
-            plines+=("$pline")
-        done < <(tmux capture-pane -peJ -t "$pane_target" 2>/dev/null | tail -$((H - 4)))
-
-        # Render preview lines
+        # Render cached preview lines
         local prow=3
         local pi=0
-        for ((pi=0; pi<${#plines[@]} && prow<H-1; pi++)); do
-            local ptext="${plines[$pi]}"
+        for ((pi=0; pi<${#_PREVIEW_LINES[@]} && prow<H-1; pi++)); do
+            local ptext="${_PREVIEW_LINES[$pi]}"
             if (( ${#ptext} > preview_width )); then
                 ptext="${ptext:0:$preview_width}"
             fi
@@ -970,6 +1124,16 @@ _selected_state() {
             P|Q)
                 if (( sidx == SELECTED )); then
                     echo "agent-pane"
+                    return
+                fi
+                ((sidx++))
+                ;;
+            I)
+                if (( sidx == SELECTED )); then
+                    # Inbox items resolve to their parent session's state
+                    local rest="${e#I|}"
+                    local sname="${rest%%|*}"
+                    echo "$(get_agent_status "$sname")"
                     return
                 fi
                 ((sidx++))
@@ -1044,7 +1208,10 @@ while true; do
     # Exit if our pane/TTY is gone (prevents orphaned processes).
     [[ ! -t 0 ]] && exit 0
 
-    (( NEEDS_COLLECT )) && collect
+    if (( NEEDS_COLLECT )); then
+        collect
+        _PREVIEW_DIRTY=1
+    fi
     NEEDS_COLLECT=0
     render
 
@@ -1053,7 +1220,7 @@ while true; do
         _handle_escape() {
             read -rsn2 -t 0.1 seq
             case "$seq" in
-                '[A') (( SELECTED > 0 )) && ((SELECTED--)); return 0 ;;
+                '[A') (( SELECTED > SESS_START )) && ((SELECTED--)); return 0 ;;
                 '[B') (( SELECTED < SEL_COUNT - 1 )) && ((SELECTED++)); return 0 ;;
                 '[<')
                     # SGR mouse: read "button;x;yM" or "button;x;ym"
@@ -1067,7 +1234,7 @@ while true; do
                         IFS=';' read -r mb mx my <<< "$mdata"
                         if (( mb == 64 )); then
                             # Scroll up
-                            (( SELECTED > 0 )) && ((SELECTED--))
+                            (( SELECTED > SESS_START )) && ((SELECTED--))
                         elif (( mb == 65 )); then
                             # Scroll down
                             (( SELECTED < SEL_COUNT - 1 )) && ((SELECTED++))
@@ -1130,7 +1297,7 @@ while true; do
                 j|k)
                     # Allow navigation even in search mode via ctrl sequences
                     [[ "$key" == "j" ]] && (( SELECTED < SEL_COUNT - 1 )) && ((SELECTED++))
-                    [[ "$key" == "k" ]] && (( SELECTED > 0 )) && ((SELECTED--))
+                    [[ "$key" == "k" ]] && (( SELECTED > SESS_START )) && ((SELECTED--))
                     ;;
                 [[:print:]])
                     SEARCH_QUERY+="$key"
@@ -1141,7 +1308,7 @@ while true; do
             # Normal mode input handling
             case "$key" in
                 j)  (( SELECTED < SEL_COUNT - 1 )) && ((SELECTED++)) ;;
-                k)  (( SELECTED > 0 )) && ((SELECTED--)) ;;
+                k)  (( SELECTED > SESS_START )) && ((SELECTED--)) ;;
                 $'\x1b')
                     if ! _handle_escape; then
                         exit 0

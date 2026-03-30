@@ -887,9 +887,21 @@ render() {
             else
                 [[ "$sess" == "$cur_session" ]] && is_cur=1
             fi
-            # Mirror selection from SESSIONS section
+            # Mirror selection from SESSIONS section (match specific pane, not whole session)
             local sel_name="${SEL_NAMES[$SELECTED]:-}"
-            [[ "$sess" == "$sel_name" || "$sess" == "${sel_name%%:*}" ]] && is_sel=1
+            local sel_type="${SEL_TYPES[$SELECTED]:-}"
+            if [[ "$sel_type" == "P" ]]; then
+                # Selected a specific pane — only highlight matching pane inbox entry
+                local sel_sess="${sel_name%%:*}" sel_pane="${sel_name#*:}"
+                if [[ -n "$pane_id" ]]; then
+                    [[ "$sess" == "$sel_sess" && "$pane_id" == "$sel_pane" ]] && is_sel=1
+                else
+                    [[ "$sess" == "$sel_sess" ]] && is_sel=1
+                fi
+            else
+                # Selected a session — highlight session-level inbox entry only
+                [[ -z "$pane_id" && "$sess" == "$sel_name" ]] && is_sel=1
+            fi
 
             local _icon _ic; _set_icon_color "$istatus"
             local max_n=$((LW - 6))
@@ -1083,7 +1095,10 @@ action_switch() {
     if [[ "$ttype" == "P" ]]; then
         local sess="${target%%:*}"
         local pane_id="${target#*:}"
+        local win
+        win=$(tmux display-message -t "$pane_id" -p '#{window_index}' 2>/dev/null)
         tmux switch-client -t "$sess" 2>/dev/null
+        [ -n "$win" ] && tmux select-window -t "$sess:$win" 2>/dev/null
         tmux select-pane -t "$pane_id" 2>/dev/null
     else
         tmux switch-client -t "$target" 2>/dev/null

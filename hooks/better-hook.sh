@@ -51,22 +51,32 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         [ -n "$PANE_ID" ] && PANE_STATUS_FILE="$PANE_DIR/${TMUX_SESSION}_${PANE_ID}.status"
 
         case "$HOOK_TYPE" in
-            "UserPromptSubmit"|"PreToolUse")
-                # User submitted a prompt or Claude is calling a tool - cancel wait mode if active
+            "UserPromptSubmit")
+                # User submitted a prompt - cancel wait/park mode and mark working
                 if [ -f "$WAIT_FILE" ]; then
-                    rm -f "$WAIT_FILE"  # Remove wait timer
+                    rm -f "$WAIT_FILE"
                 fi
                 if [ -f "$PARKED_FILE" ]; then
                     rm -f "$PARKED_FILE"
                 fi
-                # Clear unread marker on user interaction
                 rm -f "$STATUS_DIR/${TMUX_SESSION}.unread" 2>/dev/null
                 echo "working" > "$STATUS_FILE"
                 [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     rm -f "$STATUS_DIR/${TMUX_SESSION}-remote.unread" 2>/dev/null
                     echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                fi
+                ;;
+            "PreToolUse")
+                # Agent is calling a tool - mark working, but respect explicit park/wait overrides
+                if [ -f "$PARKED_FILE" ] || [ -f "$WAIT_FILE" ]; then
+                    : # User explicitly parked/waited this session; don't override
+                else
+                    echo "working" > "$STATUS_FILE"
+                    [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
+                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                        echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                    fi
                 fi
                 ;;
             "Stop"|"Notification")

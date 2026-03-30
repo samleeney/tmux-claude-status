@@ -81,7 +81,18 @@ fi
 # Start daemon monitor on session created
 tmux set-hook -g session-created "run-shell '$CURRENT_DIR/scripts/daemon-monitor.sh'"
 
+# Auto-create sidebar in new sessions (small delay so the session is ready)
+tmux set-hook -ga session-created "run-shell -b 'sleep 0.5 && $CURRENT_DIR/scripts/sidebar-toggle.sh'"
+
 # Also start it now if tmux is already running
 if tmux list-sessions >/dev/null 2>&1; then
     "$CURRENT_DIR/scripts/daemon-monitor.sh" >/dev/null 2>&1
+
+    # Create sidebar in all existing sessions that don't have one
+    for sess in $(tmux list-sessions -F '#{session_name}' 2>/dev/null); do
+        has_sidebar=$(tmux list-panes -t "$sess" -F '#{pane_title}' 2>/dev/null | grep -c "agent-sidebar")
+        if [ "$has_sidebar" -eq 0 ]; then
+            tmux run-shell -t "$sess" -b "$CURRENT_DIR/scripts/sidebar-toggle.sh" 2>/dev/null
+        fi
+    done
 fi

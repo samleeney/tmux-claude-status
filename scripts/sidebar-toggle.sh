@@ -47,8 +47,8 @@ find_file_sidebar() {
 existing=$(find_sidebar_in_window)
 
 if [ -n "$existing" ]; then
-    # Sidebar visible in current window — toggle off.
-    tmux kill-pane -t "$existing"
+    # Sidebar visible in current window — focus it (don't kill).
+    tmux select-pane -t "$existing"
 else
     # Kill any sidebar in other windows so we don't accumulate orphans.
     other=$(find_sidebar_in_session)

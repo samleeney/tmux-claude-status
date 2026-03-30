@@ -25,6 +25,12 @@ else
     echo "parked" > "$STATUS_DIR/${current_session}.status"
 fi
 
+# Also update per-pane status files so sidebar pane-level state stays consistent
+PANE_DIR="$STATUS_DIR/panes"
+for pf in "$PANE_DIR/${current_session}_"*.status; do
+    [ -f "$pf" ] && echo "parked" > "$pf"
+done
+
 NEXT_DONE_SCRIPT="$SCRIPT_DIR/next-done-project.sh"
 if [ -f "$NEXT_DONE_SCRIPT" ]; then
     if ! bash "$NEXT_DONE_SCRIPT" "$current_session" 2>/dev/null; then

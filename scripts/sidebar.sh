@@ -64,6 +64,15 @@ declare -A KNOWN_AGENTS=()
 # Set of pane IDs that currently exist in tmux (rebuilt each cycle).
 declare -A LIVE_PANES=()
 
+# Inline wait-input state.
+WAIT_INPUT_ACTIVE=0
+WAIT_INPUT_TARGET=""
+WAIT_INPUT_BUF=""
+
+# Spinner for working sessions (cycles each render).
+SPINNER_FRAMES=('⣾' '⣽' '⣻' '⢿' '⡿' '⣟' '⣯' '⣷')
+SPINNER_TICK=0
+
 # ─── ANSI helpers ─────────────────────────────────────────────────
 RST=$'\033[0m'
 BOLD=$'\033[1m'
@@ -200,11 +209,8 @@ collect() {
                 fi
             fi
         fi
-        if [ "$state" = "done" ]; then
-            if [ -f "$STATUS_DIR/${sname}.unread" ] || [ -f "$STATUS_DIR/${sname}-remote.unread" ]; then
-                state="unread"
-            fi
-        fi
+        # Clear any stale unread markers (unread is no longer a distinct state)
+        rm -f "$STATUS_DIR/${sname}.unread" "$STATUS_DIR/${sname}-remote.unread" 2>/dev/null
 
         sess_state[$sname]="$state"
         sess_extra[$sname]="$extra"
@@ -295,10 +301,10 @@ collect() {
         sess_agents[$owner]+="${pid_id}:${agent_name}:${pane_status} "
     done
 
-    # Priority: unread > done > working > wait > parked > noagent
+    # Priority: done > working > wait > parked > noagent
     _state_pri() {
         case "$1" in
-            unread)  echo 5 ;; done)    echo 4 ;; working) echo 3 ;;
+            done)    echo 4 ;; working) echo 3 ;;
             wait)    echo 2 ;; parked)  echo 1 ;; *)       echo 0 ;;
         esac
     }
@@ -306,8 +312,12 @@ collect() {
     # ── 5. Re-derive session state from per-pane statuses ──────
     # When per-pane files exist, the session's display state should be
     # the highest-priority among its panes (not just the session file).
+    # Skip sessions with explicit user overrides (wait/parked) since
+    # those should not be overridden by stale per-pane statuses.
     for sname in "${!sess_agents[@]}"; do
-        local best_pri=-1 best_st="${sess_state[$sname]}"
+        local cur_st="${sess_state[$sname]}"
+        [[ "$cur_st" == "wait" || "$cur_st" == "parked" ]] && continue
+        local best_pri=-1 best_st="$cur_st"
         best_pri=$(_state_pri "$best_st" 2>/dev/null || echo 0)
         for ap in ${sess_agents[$sname]}; do
             local rest="${ap#*:}"; rest="${rest#*:}"
@@ -357,7 +367,7 @@ collect() {
     done
 
     # ── 8. Build ENTRIES ─────────────────────────────────────────
-    local unread=() done_arr=() working=() waiting=() parked=() noagent=()
+    local done_arr=() working=() waiting=() parked=() noagent=()
 
     for sname in "${!sess_state[@]}"; do
         # Skip worktree children — they'll be added under their parent.
@@ -369,7 +379,6 @@ collect() {
         local entry="S|${sname}|${st}|${ex}|${ss}"
 
         case "$st" in
-            unread)  unread+=("$entry") ;;
             done)    done_arr+=("$entry") ;;
             working) working+=("$entry") ;;
             wait)    waiting+=("$entry") ;;
@@ -463,7 +472,6 @@ collect() {
 
     # Build final ENTRIES with group headers
     local -a groups=(
-        "unread|UNREAD|$BMAG"
         "done_arr|DONE|$BGRN"
         "working|WORKING|$BYEL"
         "waiting|WAIT|$BCYN"
@@ -514,13 +522,13 @@ render() {
     fi
 
     # Count by state for the header (only S and W entries count)
-    local nw=0 nd=0 nu=0 nwt=0
+    local nw=0 nd=0 nwt=0
     for e in "${ENTRIES[@]}"; do
         [[ "$e" != S\|* && "$e" != W\|* ]] && continue
         local rest="${e#?|}" ; rest="${rest#*|}"
         local st="${rest%%|*}"
         case "$st" in
-            working) ((nw++)) ;; done) ((nd++)) ;; unread) ((nu++)) ;; wait) ((nwt++)) ;;
+            working) ((nw++)) ;; done) ((nd++)) ;; wait) ((nwt++)) ;;
         esac
     done
 
@@ -534,9 +542,8 @@ render() {
     if (( SEARCH_ACTIVE )); then
         buf+=" ${BOLD}/${RST}${SEARCH_QUERY}${DIM}▏${RST}\033[K\n"
     else
-        local total=$((nw + nd + nu + nwt))
+        local total=$((nw + nd + nwt))
         buf+=" ${BOLD}Sessions${RST} ${DIM}${total}${RST}  "
-        (( nu > 0 ))  && buf+="${BMAG}● ${nu}${RST} "
         (( nd > 0 ))  && buf+="${BGRN}● ${nd}${RST} "
         (( nw > 0 ))  && buf+="${BYEL}● ${nw}${RST} "
         (( nwt > 0 )) && buf+="${BCYN}● ${nwt}${RST} "
@@ -674,9 +681,8 @@ render() {
         # Inline icon/color lookup (no subshells)
         _set_icon_color() {
             case "$1" in
-                working) _ic="$YEL"; _icon="⚡" ;;
+                working) _ic="$YEL"; _icon="${SPINNER_FRAMES[$SPINNER_TICK]}" ;;
                 done)    _ic="$GRN"; _icon="✓" ;;
-                unread)  _ic="$MAG"; _icon="●" ;;
                 wait)    _ic="$CYN"; _icon="⏸" ;;
                 parked)  _ic="$GRY"; _icon="≡" ;;
                 *)       _ic="$GRY"; _icon="·" ;;
@@ -849,7 +855,9 @@ render() {
 
     # ── Footer ──
     buf+="$sep"
-    if (( SEARCH_ACTIVE )); then
+    if (( WAIT_INPUT_ACTIVE )); then
+        buf+=" ${BCYN}Wait minutes for ${WAIT_INPUT_TARGET}: ${RST}${WAIT_INPUT_BUF}\033[K"
+    elif (( SEARCH_ACTIVE )); then
         buf+=" ${DIM}type to filter  ⏎ select  esc cancel${RST}\033[K"
     else
         buf+=" ${DIM}⏎ select  / search  w wait  p park  q quit${RST}\033[K"
@@ -906,6 +914,9 @@ render() {
 
         printf '%b' "$pbuf"
     fi
+
+    # Advance spinner
+    SPINNER_TICK=$(( (SPINNER_TICK + 1) % ${#SPINNER_FRAMES[@]} ))
 }
 
 # ─── Actions ──────────────────────────────────────────────────────
@@ -916,22 +927,19 @@ action_switch() {
     [[ -z "$target" ]] && return
 
     if [[ "$ttype" == "P" ]]; then
-        # target is "session:pane_id"
         local sess="${target%%:*}"
         local pane_id="${target#*:}"
-        rm -f "$STATUS_DIR/${sess}.unread" "$STATUS_DIR/${sess}-remote.unread"
         tmux switch-client -t "$sess" 2>/dev/null
         tmux select-pane -t "$pane_id" 2>/dev/null
     else
-        # S or W — target is session name
-        rm -f "$STATUS_DIR/${target}.unread" "$STATUS_DIR/${target}-remote.unread"
         tmux switch-client -t "$target" 2>/dev/null
     fi
 
-    # Popup mode: close on select. Sidebar mode: stay open.
     if (( PREVIEW_MODE )); then
+        # Popup mode: close on select.
         exit 0
     fi
+    # Sidebar mode: keep running. The new session has its own sidebar.
     NEEDS_COLLECT=1
 }
 
@@ -979,12 +987,26 @@ action_wait() {
     state=$(_selected_state)
     [[ "$state" == "noagent" || "$state" == "agent-pane" ]] && return
 
-    local handler="$CURRENT_DIR/wait-session-handler.sh"
-    tmux command-prompt -p "Wait minutes for ${target}:" \
-        "run-shell '$handler \"$target\" %1'"
-    # Handler runs async via run-shell — invalidate mtime cache so
-    # subsequent polls pick up the change once files are written.
-    _LAST_STATUS_MTIME=""
+    # Toggle: if already waiting, cancel wait
+    if [[ "$state" == "wait" ]]; then
+        rm -f "$WAIT_DIR/${target}.wait"
+        if [ -f "$STATUS_DIR/${target}-remote.status" ]; then
+            echo "done" > "$STATUS_DIR/${target}-remote.status"
+        else
+            echo "done" > "$STATUS_DIR/${target}.status"
+        fi
+        local pane_dir="$STATUS_DIR/panes"
+        for pf in "$pane_dir/${target}_"*.status; do
+            [ -f "$pf" ] && echo "done" > "$pf"
+        done
+        _LAST_STATUS_MTIME=""
+        return
+    fi
+
+    # Inline prompt: read minutes directly in the sidebar
+    WAIT_INPUT_ACTIVE=1
+    WAIT_INPUT_TARGET="$target"
+    WAIT_INPUT_BUF=""
 }
 
 action_park() {
@@ -1017,6 +1039,7 @@ action_park() {
 
 # ─── Main loop ────────────────────────────────────────────────────
 NEEDS_COLLECT=1
+_idle_ticks=0
 while true; do
     # Exit if our pane/TTY is gone (prevents orphaned processes).
     [[ ! -t 0 ]] && exit 0
@@ -1025,7 +1048,7 @@ while true; do
     NEEDS_COLLECT=0
     render
 
-    if read -rsn1 -t 1 key; then
+    if read -rsn1 -t 0.08 key; then
         # Handle escape sequences (arrows, mouse) shared by both modes.
         _handle_escape() {
             read -rsn2 -t 0.1 seq
@@ -1063,7 +1086,25 @@ while true; do
             return 1  # unhandled
         }
 
-        if (( SEARCH_ACTIVE )); then
+        if (( WAIT_INPUT_ACTIVE )); then
+            # Wait-input mode: accept digits, Enter to confirm, Esc to cancel
+            case "$key" in
+                $'\x1b')
+                    WAIT_INPUT_ACTIVE=0; WAIT_INPUT_BUF="" ;;
+                $'\x7f'|$'\b')
+                    WAIT_INPUT_BUF="${WAIT_INPUT_BUF%?}"
+                    [[ -z "$WAIT_INPUT_BUF" ]] && { WAIT_INPUT_ACTIVE=0; WAIT_INPUT_BUF=""; } ;;
+                '')  # Enter — confirm
+                    if [[ -n "$WAIT_INPUT_BUF" ]] && [[ "$WAIT_INPUT_BUF" =~ ^[0-9]+$ ]] && (( WAIT_INPUT_BUF > 0 )); then
+                        bash "$CURRENT_DIR/wait-session-handler.sh" "$WAIT_INPUT_TARGET" "$WAIT_INPUT_BUF"
+                        NEEDS_COLLECT=1
+                        _LAST_STATUS_MTIME=""
+                    fi
+                    WAIT_INPUT_ACTIVE=0; WAIT_INPUT_BUF="" ;;
+                [0-9])
+                    WAIT_INPUT_BUF+="$key" ;;
+            esac
+        elif (( SEARCH_ACTIVE )); then
             # Search mode input handling
             case "$key" in
                 $'\x1b')
@@ -1118,7 +1159,7 @@ while true; do
             esac
         fi
     else
-        # Timeout (no keypress) — refresh data
-        NEEDS_COLLECT=1
+        # Timeout (no keypress) — refresh data every ~1s (12 ticks × 0.08s)
+        (( ++_idle_ticks >= 12 )) && { NEEDS_COLLECT=1; _idle_ticks=0; }
     fi
 done

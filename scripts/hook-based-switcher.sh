@@ -3,82 +3,8 @@
 # Hook-based session switcher that reads status from files
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-STATUS_DIR="$HOME/.cache/tmux-agent-status"
-PARKED_DIR="$STATUS_DIR/parked"
-# shellcheck source=lib/agent-processes.sh
-source "$SCRIPT_DIR/lib/agent-processes.sh"
-
-# Function to check if an agent (Claude or Codex) is in a session
-has_agent_in_session() {
-    session_has_agent_process "$1"
-}
-
-# Function to check if session is SSH by examining panes
-is_ssh_session() {
-    local session="$1"
-    # Check if any pane in the session is running SSH
-    if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
-        return 0
-    fi
-    # Simple fallback: check if session name matches known SSH hosts
-    case "$session" in
-        reachgpu) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-
-# Function to get SSH host for session
-get_ssh_host() {
-    local session="$1"
-    # For now, if it's an SSH session, assume the session name is the host
-    # This is simple and works for most cases where session names match SSH config
-    if is_ssh_session "$session"; then
-        echo "$session"
-    fi
-}
-
-# Function to get agent status from hook files
-normalize_local_wait_status() {
-    local session="$1"
-    local status_file="$STATUS_DIR/${session}.status"
-    local wait_file="$STATUS_DIR/wait/${session}.wait"
-
-    [ ! -f "$status_file" ] && return
-
-    local status
-    status=$(cat "$status_file" 2>/dev/null || echo "")
-    if [ "$status" = "wait" ] && [ ! -f "$wait_file" ]; then
-        echo "done" > "$status_file" 2>/dev/null
-    fi
-}
-
-get_agent_status() {
-    local session="$1"
-
-    if [ -f "$PARKED_DIR/${session}.parked" ]; then
-        echo "parked"
-        return
-    fi
-
-    # Check for remote status file first (for SSH sessions)
-    local remote_status="$STATUS_DIR/${session}-remote.status"
-    if [ -f "$remote_status" ] && is_ssh_session "$session"; then
-        cat "$remote_status" 2>/dev/null
-        return
-    elif [ -f "$remote_status" ] && ! is_ssh_session "$session"; then
-        rm -f "$remote_status" 2>/dev/null
-    fi
-
-    # Check local status files
-    local status_file="$STATUS_DIR/${session}.status"
-    if [ -f "$status_file" ]; then
-        normalize_local_wait_status "$session"
-        cat "$status_file" 2>/dev/null || echo ""
-    else
-        echo ""
-    fi
-}
+# shellcheck source=lib/session-status.sh
+source "$SCRIPT_DIR/lib/session-status.sh"
 
 # Get all sessions with formatted output
 get_sessions_with_status() {

@@ -30,8 +30,27 @@ park_key=$(tmux show-option -gqv "@agent-park-key")
 [ -z "$wait_key" ] && wait_key="$default_wait_key"
 [ -z "$park_key" ] && park_key="$default_park_key"
 
-# Set up custom session switcher with agent status (hook-based)
-tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/hook-based-switcher.sh"
+# Switcher style: "popup" (fzf only), "sidebar" (sidebar only), or "both" (default)
+switcher_style=$(tmux show-option -gqv "@agent-switcher-style")
+[ -z "$switcher_style" ] && switcher_style="both"
+
+# Sidebar key (used in "both" mode; in "sidebar" mode the main switcher key is used)
+sidebar_key=$(tmux show-option -gqv "@agent-sidebar-key")
+[ -z "$sidebar_key" ] && sidebar_key=$(tmux show-option -gqv "@claude-sidebar-key")
+[ -z "$sidebar_key" ] && sidebar_key="o"
+
+case "$switcher_style" in
+    popup)
+        tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/sidebar.sh --preview"
+        ;;
+    sidebar)
+        tmux bind-key "$switcher_key" run-shell "$CURRENT_DIR/scripts/sidebar-toggle.sh"
+        ;;
+    both|*)
+        tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/sidebar.sh --preview"
+        tmux bind-key "$sidebar_key" run-shell "$CURRENT_DIR/scripts/sidebar-toggle.sh"
+        ;;
+esac
 
 # Set up keybinding to switch to next done project
 tmux bind-key "$next_done_key" run-shell "$CURRENT_DIR/scripts/next-done-project.sh"

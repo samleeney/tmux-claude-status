@@ -43,6 +43,13 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
         PARKED_FILE="$STATUS_DIR/parked/${TMUX_SESSION}.parked"
 
+        # Per-pane status tracking (for sidebar multi-agent display).
+        PANE_DIR="$STATUS_DIR/panes"
+        mkdir -p "$PANE_DIR"
+        PANE_ID="${TMUX_PANE:-}"
+        PANE_STATUS_FILE=""
+        [ -n "$PANE_ID" ] && PANE_STATUS_FILE="$PANE_DIR/${TMUX_SESSION}_${PANE_ID}.status"
+
         case "$HOOK_TYPE" in
             "UserPromptSubmit"|"PreToolUse")
                 # User submitted a prompt or Claude is calling a tool - cancel wait mode if active
@@ -55,6 +62,7 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 # Clear unread marker on user interaction
                 rm -f "$STATUS_DIR/${TMUX_SESSION}.unread" 2>/dev/null
                 echo "working" > "$STATUS_FILE"
+                [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
                 # Only write to remote status file if we're in an SSH session
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     rm -f "$STATUS_DIR/${TMUX_SESSION}-remote.unread" 2>/dev/null
@@ -65,6 +73,7 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 # Agent finished — mark done and check if session is unread
                 PREV_STATUS=$(cat "$STATUS_FILE" 2>/dev/null || echo "")
                 echo "done" > "$STATUS_FILE"
+                [ -n "$PANE_STATUS_FILE" ] && echo "done" > "$PANE_STATUS_FILE"
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi

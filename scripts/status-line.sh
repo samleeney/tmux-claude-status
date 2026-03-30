@@ -3,27 +3,14 @@
 # Status line script for tmux status bar
 # Shows agent status across all sessions
 
-STATUS_DIR="$HOME/.cache/tmux-agent-status"
-PARKED_DIR="$STATUS_DIR/parked"
-LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/agent-processes.sh
-source "$SCRIPT_DIR/lib/agent-processes.sh"
-
-is_ssh_session() {
-    local session="$1"
-    if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
-        return 0
-    fi
-    case "$session" in
-        reachgpu) return 0 ;;
-        *) return 1 ;;
-    esac
-}
+# shellcheck source=lib/session-status.sh
+source "$SCRIPT_DIR/lib/session-status.sh"
+LAST_STATUS_FILE="/tmp/tmux-agent-last-status-summary"
 
 # Check and expire wait timers
 check_wait_timers() {
-    local wait_dir="$STATUS_DIR/wait"
+    local wait_dir="$WAIT_DIR"
     [ ! -d "$wait_dir" ] && return
     local current_time=$(date +%s)
     for wait_file in "$wait_dir"/*.wait; do
@@ -37,20 +24,6 @@ check_wait_timers() {
             rm -f "$wait_file"
         fi
     done
-}
-
-normalize_local_wait_status() {
-    local session="$1"
-    local status_file="$STATUS_DIR/${session}.status"
-    local wait_file="$STATUS_DIR/wait/${session}.wait"
-
-    [ ! -f "$status_file" ] && return
-
-    local status
-    status=$(cat "$status_file" 2>/dev/null || echo "")
-    if [ "$status" = "wait" ] && [ ! -f "$wait_file" ]; then
-        echo "done" > "$status_file" 2>/dev/null
-    fi
 }
 
 # Check for agent processes (Codex) via process polling
@@ -93,7 +66,7 @@ check_agent_processes() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
         local status_file="$STATUS_DIR/${session}.status"
-        local wait_file="$STATUS_DIR/wait/${session}.wait"
+        local wait_file="$WAIT_DIR/${session}.wait"
         local parked_file="$PARKED_DIR/${session}.parked"
         local codex_pid=""
 

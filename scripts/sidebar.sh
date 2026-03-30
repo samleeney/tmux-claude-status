@@ -47,6 +47,7 @@ declare -a SCREEN_SEL=()
 
 # Change detection: skip collect when status dir hasn't changed.
 _LAST_STATUS_MTIME=""
+_COLLECT_TICK=0
 
 # Flat list rebuilt each frame.  Each element is one of:
 #   "G|<label>|<color>"                          — group header (not selectable)
@@ -156,6 +157,8 @@ _collect_cur_client() {
 collect() {
     # Quick change detection: skip full rebuild if nothing changed.
     # Check mtimes of status dir, parked dir, and wait dir.
+    # Force full rebuild every ~10s to catch status content changes and new agents.
+    (( ++_COLLECT_TICK >= 10 )) && { _COLLECT_TICK=0; _LAST_STATUS_MTIME=""; }
     local cur_mtime
     cur_mtime=$(stat -c %Y "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" 2>/dev/null)
     if [[ "$cur_mtime" == "$_LAST_STATUS_MTIME" ]]; then
@@ -514,27 +517,54 @@ collect() {
     }
 
     # ── INBOX: panes/sessions with status "done" that need action ──
+    # Rules mirror _emit_agents: 1 agent → session only, 2+ agents 1 window → per pane,
+    # 2+ agents multi-window → per window (1 pane windows use window name).
     local inbox=()
-    # Multi-agent sessions: each done pane is an inbox item
     for sname in "${!sess_agents[@]}"; do
         [[ -f "$PARKED_DIR/${sname}.parked" ]] && continue
         _get_agent_arr "$sname"
-        local arr_copy=("${_agent_result[@]}")
-        local agent_count=${#arr_copy[@]}
-        local ai=0
-        for ap in "${arr_copy[@]}"; do
-            ((ai++))
-            local pid="${ap%%:*}"; local rest="${ap#*:}"
-            local agent_name="${rest%%:*}"; local pstatus="${rest#*:}"
-            if [[ "$pstatus" == "done" ]]; then
-                if (( agent_count > 1 )); then
-                    # I|session|pane_id|label|status
-                    inbox+=("I|${sname}|${pid}|${sname} › ${agent_name} #${ai}|${pstatus}")
-                else
-                    inbox+=("I|${sname}||${sname}|${pstatus}")
-                fi
-            fi
+        local arr=("${_agent_result[@]}")
+        if (( ${#arr[@]} <= 1 )); then
+            # Single agent — session-level inbox entry
+            local ap="${arr[0]:-}"
+            local pst="${ap#*:}"; pst="${pst#*:}"
+            [[ "$pst" == "done" ]] && inbox+=("I|${sname}||${sname}|done")
+            continue
+        fi
+        # Group by window
+        local -A _ib_win=() _ib_wseen=()
+        local -a _ib_worder=()
+        for ap in "${arr[@]}"; do
+            local pid="${ap%%:*}"
+            local wi="${pane_to_window[$pid]:-0}"
+            [[ -z "${_ib_wseen[$wi]:-}" ]] && { _ib_worder+=("$wi"); _ib_wseen[$wi]=1; }
+            _ib_win[$wi]+="$ap "
         done
+        if (( ${#_ib_worder[@]} == 1 )); then
+            # Single window — per pane entries
+            local ai=0
+            for ap in "${arr[@]}"; do
+                ((ai++))
+                local pid="${ap%%:*}" r="${ap#*:}"
+                local aname="${r%%:*}" pst="${r#*:}"
+                [[ "$pst" == "done" ]] && inbox+=("I|${sname}|${pid}|${sname} › ${aname} #${ai}|done")
+            done
+        else
+            # Multiple windows — per window entries
+            for wi in "${_ib_worder[@]}"; do
+                local wname="${window_names[${sname}:${wi}]:-window-$wi}"
+                # Window status = best of its panes
+                local best_pri=-1 best_st="noagent" any_done=0 w_pid=""
+                for wap in ${_ib_win[$wi]}; do
+                    local pid="${wap%%:*}" ws="${wap#*:}"; ws="${ws#*:}"
+                    [[ -z "$w_pid" ]] && w_pid="$pid"
+                    [[ "$ws" == "done" ]] && any_done=1
+                    local wp; wp=$(_state_pri "$ws" 2>/dev/null || echo 0)
+                    (( wp > best_pri )) && { best_pri=$wp; best_st="$ws"; }
+                done
+                (( any_done )) && inbox+=("I|${sname}|${w_pid}|${sname} › ${wname}|done")
+            done
+        fi
     done
     # Single-agent sessions (not in sess_agents) with done status
     for sname in "${!sess_state[@]}"; do
@@ -985,14 +1015,14 @@ render() {
             local pad
 
             if (( is_sel )); then
-                pad=$((LW - vlen - 9))
+                pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
-                buf+="${SEL_BG}   ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
+                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
-                pad=$((LW - vlen - 9))
+                pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
-                buf+="${CUR_BG}   ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
+                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
                 pad=$((LW - ${#agent} - 8))
@@ -1021,14 +1051,14 @@ render() {
             local pad
 
             if (( is_sel )); then
-                pad=$((LW - vlen - 11))
+                pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
-                buf+="${SEL_BG}   ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
+                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
-                pad=$((LW - vlen - 11))
+                pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
-                buf+="${CUR_BG}   ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
+                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
                 pad=$((LW - ${#agent} - 10))

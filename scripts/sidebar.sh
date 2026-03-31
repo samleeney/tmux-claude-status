@@ -187,8 +187,17 @@ collect() {
                 PANE_COUNTS[$pcname]="${rest#*:}"
                 ;;
             E) ENTRIES+=("${line#E:}") ;;
-            N) SEL_NAMES+=("${line#N:}") ;;
-            T) SEL_TYPES+=("${line#T:}") ;;
+            R)
+                # "R:entry_data|=sel_name|=sel_type"
+                local rdata="${line#R:}"
+                local sel_type="${rdata##*|=}"
+                rdata="${rdata%|=*}"
+                local sel_name="${rdata##*|=}"
+                rdata="${rdata%|=*}"
+                ENTRIES+=("$rdata")
+                SEL_NAMES+=("$sel_name")
+                SEL_TYPES+=("$sel_type")
+                ;;
         esac
     done < "$cache_file"
 

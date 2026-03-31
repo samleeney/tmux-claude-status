@@ -168,7 +168,11 @@ do_collect() {
             (( pri > best_pri )) && { best_pri=$pri; best_st="$st"; }
         done
         (( nw + nd + nwt > 0 )) && PANE_COUNTS[$sname]="${nw}:${nd}:${nwt}"
-        [ "$best_st" != "noagent" ] && sess_state[$sname]="$best_st"
+        # Don't override explicit parked/wait session state with agent-derived state
+        local cur="${sess_state[$sname]}"
+        if [[ "$cur" != "parked" && "$cur" != "wait" ]] && [ "$best_st" != "noagent" ]; then
+            sess_state[$sname]="$best_st"
+        fi
     done
 
     # Effective state (bubble children up)
@@ -347,18 +351,24 @@ do_collect() {
         done
     fi
 
-    # Write cache atomically
+    # Write cache atomically.
+    # Selectable entries get "R:" (row) lines with name and type appended.
+    # Non-selectable entries (group headers) get plain "E:" lines.
     {
         echo "TS:$(date +%s)"
         echo "SESS_START:$SESS_START"
         for sname in "${!PANE_COUNTS[@]}"; do
             echo "PC:${sname}:${PANE_COUNTS[$sname]}"
         done
-        local i
-        for ((i=0; i<${#ENTRIES[@]}; i++)); do
-            echo "E:${ENTRIES[$i]}"
-            echo "N:${SEL_NAMES[$i]:-}"
-            echo "T:${SEL_TYPES[$i]:-}"
+        local si=0
+        for entry in "${ENTRIES[@]}"; do
+            local etype="${entry%%|*}"
+            if [[ "$etype" == "G" ]]; then
+                echo "E:${entry}"
+            else
+                echo "R:${entry}|=${SEL_NAMES[$si]}|=${SEL_TYPES[$si]}"
+                ((si++))
+            fi
         done
     } > "${CACHE_FILE}.tmp"
     mv -f "${CACHE_FILE}.tmp" "$CACHE_FILE"

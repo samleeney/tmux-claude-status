@@ -63,11 +63,7 @@ SEL_NAMES=()     # session name (for S/W) or "session:pane_id" (for P)
 SEL_TYPES=()     # "S", "W", or "P"
 SEL_COUNT=0
 
-# Persistent across collect cycles: tracks known agent panes.
-# Key: "session:pane_id"  Value: "agent_name"
-declare -A KNOWN_AGENTS=()
-# Set of pane IDs that currently exist in tmux (rebuilt each cycle).
-declare -A LIVE_PANES=()
+# (Agent tracking moved to lib/collect.sh, run by sidebar-collector.sh)
 
 # Inline wait-input state.
 WAIT_INPUT_ACTIVE=0
@@ -116,37 +112,7 @@ _fuzzy_match() {
     (( qi == qlen ))
 }
 
-# ─── PID ancestry helpers ─────────────────────────────────────────
-# Global PID→PPID map, populated once per collect cycle.
-declare -A PID_PPID
-
-_build_pid_map() {
-    PID_PPID=()
-    while read -r p pp; do
-        [ -z "$p" ] && continue
-        PID_PPID[$p]="$pp"
-    done < <(ps -eo pid=,ppid= 2>/dev/null)
-}
-
-# Walk up the process tree from $1 looking for any PID in the
-# space-separated set $2.  Returns 0 and prints the matching pane PID.
-find_ancestor_pane() {
-    local pid="$1"
-    local pane_pid_set=" $2 "
-    local depth=0
-    while (( pid > 1 && depth < 30 )); do
-        if [[ "$pane_pid_set" == *" $pid "* ]]; then
-            echo "$pid"
-            return 0
-        fi
-        pid="${PID_PPID[$pid]:-}"
-        [ -z "$pid" ] && return 1
-        ((depth++))
-    done
-    return 1
-}
-
-# ─── Data collection ─────────────────────────────────────────────
+# ─── Data collection (reads cache from sidebar-collector.sh) ─────
 _collect_cur_client() {
     local info
     info=$(tmux display-message -p $'#{client_session}\t#{pane_id}' 2>/dev/null || true)
@@ -188,12 +154,12 @@ collect() {
                 ;;
             E) ENTRIES+=("${line#E:}") ;;
             R)
-                # "R:entry_data|=sel_name|=sel_type"
+                # "R:entry_data\tsel_name\tsel_type"
                 local rdata="${line#R:}"
-                local sel_type="${rdata##*|=}"
-                rdata="${rdata%|=*}"
-                local sel_name="${rdata##*|=}"
-                rdata="${rdata%|=*}"
+                local sel_type="${rdata##*	}"
+                rdata="${rdata%	*}"
+                local sel_name="${rdata##*	}"
+                rdata="${rdata%	*}"
                 ENTRIES+=("$rdata")
                 SEL_NAMES+=("$sel_name")
                 SEL_TYPES+=("$sel_type")

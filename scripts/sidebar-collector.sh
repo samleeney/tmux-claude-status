@@ -160,26 +160,14 @@ do_collect() {
             fi
         done < <(tmux list-panes -s -t "$sname" -F "#{pane_id}${_tab}#{pane_pid}${_tab}#{window_index}" 2>/dev/null)
 
-        # 3b. Include panes with status files but no running process (finished agents)
+        # 3b. Clean up stale pane status files for panes that no longer exist
         for psf in "$STATUS_DIR/panes/${sname}_"*.status; do
             [ -f "$psf" ] || continue
             local bname
             bname=$(basename "$psf" .status)
             local pane_id="${bname#${sname}_}"
             [[ -n "${_seen_panes[${sname}_${pane_id}]:-}" ]] && continue
-            # Verify pane still exists in tmux
-            tmux display-message -t "$pane_id" -p '' 2>/dev/null || continue
-            _seen_panes["${sname}_${pane_id}"]=1
-            local pane_status=$(<"$psf")
-            [ -f "$PARKED_DIR/${sname}_${pane_id}.parked" ] && pane_status="parked"
-            local pwf="$WAIT_DIR/${sname}_${pane_id}.wait"
-            if [ -f "$pwf" ]; then
-                local exp=$(<"$pwf")
-                if [ -n "$exp" ] && (( exp > now )); then
-                    pane_status="wait"
-                fi
-            fi
-            sess_agents[$sname]+="${pane_id}:agent:${pane_status} "
+            tmux display-message -t "$pane_id" -p '' 2>/dev/null || rm -f "$psf"
         done
     done
 

@@ -8,20 +8,48 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/session-status.sh"
 LAST_STATUS_FILE="/tmp/tmux-agent-last-status-summary"
 
-# Check and expire wait timers
+# Check and expire wait timers (session-level and per-pane)
 check_wait_timers() {
     local wait_dir="$WAIT_DIR"
     [ ! -d "$wait_dir" ] && return
     local current_time=$(date +%s)
+    local pane_dir="$STATUS_DIR/panes"
+
     for wait_file in "$wait_dir"/*.wait; do
         [ ! -f "$wait_file" ] && continue
-        local session_name=$(basename "$wait_file" .wait)
+        local bname=$(basename "$wait_file" .wait)
         local expiry_time=$(cat "$wait_file" 2>/dev/null)
-        if [ -n "$expiry_time" ] && [ "$current_time" -ge "$expiry_time" ]; then
-            echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
-            # Only update remote status if it already exists (SSH sessions)
-            [ -f "$STATUS_DIR/${session_name}-remote.status" ] && echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
+        [ -z "$expiry_time" ] && continue
+        [ "$current_time" -lt "$expiry_time" ] && continue
+
+        # Expired — determine if per-pane or session-level
+        if [[ "$bname" == *_%* ]]; then
+            # Per-pane: e.g. "session_%5"
+            echo "done" > "$pane_dir/${bname}.status" 2>/dev/null
             rm -f "$wait_file"
+            # If no more per-pane waits for this session, clear session wait too
+            local session="${bname%%_\%*}"
+            local has_remaining=0
+            for remaining in "$wait_dir/${session}_"*.wait; do
+                [ -f "$remaining" ] && { has_remaining=1; break; }
+            done
+            if [ "$has_remaining" -eq 0 ]; then
+                rm -f "$wait_dir/${session}.wait" 2>/dev/null
+                echo "done" > "$STATUS_DIR/${session}.status" 2>/dev/null
+                [ -f "$STATUS_DIR/${session}-remote.status" ] && echo "done" > "$STATUS_DIR/${session}-remote.status" 2>/dev/null
+            fi
+        else
+            # Session-level
+            echo "done" > "$STATUS_DIR/${bname}.status" 2>/dev/null
+            [ -f "$STATUS_DIR/${bname}-remote.status" ] && echo "done" > "$STATUS_DIR/${bname}-remote.status" 2>/dev/null
+            rm -f "$wait_file"
+            # Also expire any per-pane waits for this session
+            for pane_wait in "$wait_dir/${bname}_"*.wait; do
+                [ -f "$pane_wait" ] || continue
+                local pane_bname=$(basename "$pane_wait" .wait)
+                echo "done" > "$pane_dir/${pane_bname}.status" 2>/dev/null
+                rm -f "$pane_wait"
+            done
         fi
     done
 }

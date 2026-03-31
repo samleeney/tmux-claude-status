@@ -61,6 +61,13 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
             return 1
         }
 
+        # Check if the current pane is waited (either session-level or pane-level).
+        _pane_is_waited() {
+            [ -f "$WAIT_FILE" ] && return 0
+            [ -n "$PANE_WAIT_FILE" ] && [ -f "$PANE_WAIT_FILE" ] && return 0
+            return 1
+        }
+
         # Hierarchical unpark for the current pane:
         #   Session parked → unpark entire session (all panes)
         #   Window parked (all panes in window parked) → unpark all panes in window
@@ -104,11 +111,48 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
             fi
         }
 
+        # Hierarchical unwait — mirrors _unpark_current logic.
+        _unwait_current() {
+            if [ -f "$WAIT_FILE" ]; then
+                # Session-level wait: cancel everything
+                rm -f "$WAIT_FILE"
+                rm -f "$WAIT_DIR/${TMUX_SESSION}_"*.wait 2>/dev/null
+                for pf in "$PANE_DIR/${TMUX_SESSION}_"*.status; do
+                    [ -f "$pf" ] && [ "$(cat "$pf")" = "wait" ] && echo "done" > "$pf"
+                done
+            elif [ -n "$PANE_WAIT_FILE" ] && [ -f "$PANE_WAIT_FILE" ]; then
+                local cur_window
+                cur_window=$(tmux display-message -p '#{window_index}' 2>/dev/null)
+                local all_waiting=1
+                while IFS= read -r wp_id; do
+                    [ -z "$wp_id" ] && continue
+                    if [ ! -f "$WAIT_DIR/${TMUX_SESSION}_${wp_id}.wait" ]; then
+                        all_waiting=0
+                        break
+                    fi
+                done < <(tmux list-panes -t "${TMUX_SESSION}:${cur_window}" -F '#{pane_id}' 2>/dev/null)
+
+                if [ "$all_waiting" -eq 1 ] && [ -n "$cur_window" ]; then
+                    # Window-level: cancel all pane waits in this window
+                    while IFS= read -r wp_id; do
+                        [ -z "$wp_id" ] && continue
+                        rm -f "$WAIT_DIR/${TMUX_SESSION}_${wp_id}.wait"
+                        local wpf="$PANE_DIR/${TMUX_SESSION}_${wp_id}.status"
+                        [ -f "$wpf" ] && [ "$(cat "$wpf")" = "wait" ] && echo "done" > "$wpf"
+                    done < <(tmux list-panes -t "${TMUX_SESSION}:${cur_window}" -F '#{pane_id}' 2>/dev/null)
+                else
+                    # Pane-level: cancel just this pane's wait
+                    rm -f "$PANE_WAIT_FILE"
+                fi
+                [ -n "$PANE_STATUS_FILE" ] && [ -f "$PANE_STATUS_FILE" ] && [ "$(cat "$PANE_STATUS_FILE")" = "wait" ] && echo "done" > "$PANE_STATUS_FILE"
+            fi
+        }
+
         case "$HOOK_TYPE" in
             "UserPromptSubmit")
                 # User submitted a prompt — explicit interaction, unpark and cancel wait.
                 _unpark_current
-                rm -f "$WAIT_FILE" "$PANE_WAIT_FILE"
+                _unwait_current
                 rm -f "$STATUS_DIR/${TMUX_SESSION}.unread" 2>/dev/null
                 echo "working" > "$STATUS_FILE"
                 [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
@@ -121,7 +165,7 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 # Detect AskUserQuestion; respect explicit wait/park overrides.
                 TOOL_NAME=$(echo "$JSON_INPUT" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tool_name"[[:space:]]*:[[:space:]]*"//;s/"//')
                 if [ "$TOOL_NAME" = "AskUserQuestion" ]; then
-                    if ! _pane_is_parked && [ ! -f "$PANE_WAIT_FILE" ] && [ ! -f "$WAIT_FILE" ]; then
+                    if ! _pane_is_parked && ! _pane_is_waited; then
                         echo "ask" > "$STATUS_FILE"
                         [ -n "$PANE_STATUS_FILE" ] && echo "ask" > "$PANE_STATUS_FILE"
                         if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
@@ -132,7 +176,7 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     fi
                 else
                     # Normal tool use — mark working but don't touch parked/waited panes
-                    if ! _pane_is_parked && [ ! -f "$PANE_WAIT_FILE" ] && [ ! -f "$WAIT_FILE" ]; then
+                    if ! _pane_is_parked && ! _pane_is_waited; then
                         echo "working" > "$STATUS_FILE"
                         [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
                         if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
@@ -142,8 +186,8 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 fi
                 ;;
             "Stop"|"Notification")
-                # Don't overwrite parked panes. Keep Notification from overwriting "ask".
-                if _pane_is_parked; then
+                # Don't overwrite parked or waited panes. Keep Notification from overwriting "ask".
+                if _pane_is_parked || _pane_is_waited; then
                     :
                 else
                     PREV_STATUS=$(cat "$STATUS_FILE" 2>/dev/null || echo "")

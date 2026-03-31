@@ -1232,31 +1232,56 @@ _selected_state() {
 
 action_wait() {
     (( SEL_COUNT == 0 )) && return
-    local target
-    target=$(_selected_session)
+    local raw_target="${SEL_NAMES[$SELECTED]}"
+    local ttype="${SEL_TYPES[$SELECTED]}"
     local state
     state=$(_selected_state)
     [[ "$state" == "noagent" || "$state" == "agent-pane" ]] && return
 
     # Toggle: if already waiting, cancel wait
     if [[ "$state" == "wait" ]]; then
-        rm -f "$WAIT_DIR/${target}.wait"
-        if [ -f "$STATUS_DIR/${target}-remote.status" ]; then
-            echo "done" > "$STATUS_DIR/${target}-remote.status"
+        if [[ "$ttype" == "P" ]]; then
+            # Pane-level cancel
+            local session="${raw_target%%:*}"
+            local pane_id="${raw_target#*:}"
+            rm -f "$WAIT_DIR/${session}_${pane_id}.wait"
+            echo "done" > "$STATUS_DIR/panes/${session}_${pane_id}.status" 2>/dev/null
+            # Clear session-level wait if no pane waits remain
+            local has_remaining=0
+            for remaining in "$WAIT_DIR/${session}_"*.wait; do
+                [ -f "$remaining" ] && { has_remaining=1; break; }
+            done
+            if [ "$has_remaining" -eq 0 ]; then
+                rm -f "$WAIT_DIR/${session}.wait"
+                echo "done" > "$STATUS_DIR/${session}.status" 2>/dev/null
+            fi
         else
-            echo "done" > "$STATUS_DIR/${target}.status"
+            # Session-level cancel
+            local session="$raw_target"
+            rm -f "$WAIT_DIR/${session}.wait"
+            rm -f "$WAIT_DIR/${session}_"*.wait 2>/dev/null
+            if [ -f "$STATUS_DIR/${session}-remote.status" ]; then
+                echo "done" > "$STATUS_DIR/${session}-remote.status"
+            else
+                echo "done" > "$STATUS_DIR/${session}.status"
+            fi
+            for pf in "$STATUS_DIR/panes/${session}_"*.status; do
+                [ -f "$pf" ] && [ "$(cat "$pf")" = "wait" ] && echo "done" > "$pf"
+            done
         fi
-        local pane_dir="$STATUS_DIR/panes"
-        for pf in "$pane_dir/${target}_"*.status; do
-            [ -f "$pf" ] && echo "done" > "$pf"
-        done
         _LAST_STATUS_MTIME=""
         return
     fi
 
-    # Inline prompt: read minutes directly in the sidebar
+    # Inline prompt: read minutes directly in the sidebar.
+    # Pass the full target (session or session:pane_id) so the handler
+    # knows whether to wait at session or pane level.
     WAIT_INPUT_ACTIVE=1
-    WAIT_INPUT_TARGET="$target"
+    if [[ "$ttype" == "P" ]]; then
+        WAIT_INPUT_TARGET="$raw_target"
+    else
+        WAIT_INPUT_TARGET="$(_selected_session)"
+    fi
     WAIT_INPUT_BUF=""
 }
 

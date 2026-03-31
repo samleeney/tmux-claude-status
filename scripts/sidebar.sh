@@ -1249,7 +1249,6 @@ action_wait() {
     local ttype="${SEL_TYPES[$SELECTED]}"
     local state
     state=$(_selected_state)
-    [[ "$state" == "noagent" ]] && return
 
     # Toggle: if already waiting, cancel wait
     if [[ "$state" == "wait" ]]; then
@@ -1316,7 +1315,6 @@ action_park() {
     local ttype="${SEL_TYPES[$SELECTED]}"
     local state
     state=$(_selected_state)
-    [[ "$state" == "noagent" ]] && return
 
     local session_name
     if [[ "$ttype" == "P" ]]; then

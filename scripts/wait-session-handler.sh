@@ -20,8 +20,23 @@ fi
 
 expiry_time=$(($(date +%s) + (wait_minutes * 60)))
 
-# Determine if this is a pane-level or session-level wait.
-if [[ "$target" == *:* ]]; then
+# Determine if this is a window-level, pane-level, or session-level wait.
+if [[ "$target" == *:w* ]]; then
+    # Window-level wait: "session:wN"
+    session="${target%%:*}"
+    win_idx="${target#*:w}"
+
+    while IFS= read -r pid; do
+        [ -z "$pid" ] && continue
+        echo "$expiry_time" > "$WAIT_DIR/${session}_${pid}.wait"
+        echo "wait" > "$PANE_DIR/${session}_${pid}.status"
+        rm -f "$PARKED_DIR/${session}_${pid}.parked" 2>/dev/null
+    done < <(tmux list-panes -t "${session}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
+    sync
+
+    echo "wait" > "$STATUS_DIR/${session}.status"
+    tmux display-message "Window $win_idx will wait for $wait_minutes minutes"
+elif [[ "$target" == *:* ]]; then
     # Pane-level wait: "session:pane_id"
     session="${target%%:*}"
     pane_id="${target#*:}"

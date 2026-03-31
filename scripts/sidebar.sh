@@ -1251,11 +1251,23 @@ action_wait() {
     # Toggle: if already waiting, cancel wait
     if [[ "$state" == "wait" ]]; then
         if [[ "$ttype" == "P" ]]; then
-            # Pane-level cancel
             local session="${raw_target%%:*}"
             local pane_id="${raw_target#*:}"
-            rm -f "$WAIT_DIR/${session}_${pane_id}.wait"
-            echo "done" > "$STATUS_DIR/panes/${session}_${pane_id}.status" 2>/dev/null
+
+            if [[ "$pane_id" == w* ]]; then
+                # Window-level cancel
+                local win_idx="${pane_id#w}"
+                while IFS= read -r wp_id; do
+                    [ -z "$wp_id" ] && continue
+                    rm -f "$WAIT_DIR/${session}_${wp_id}.wait"
+                    local pf="$STATUS_DIR/panes/${session}_${wp_id}.status"
+                    [ -f "$pf" ] && [ "$(cat "$pf")" = "wait" ] && echo "done" > "$pf"
+                done < <(tmux list-panes -t "${session}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
+            else
+                # Pane-level cancel
+                rm -f "$WAIT_DIR/${session}_${pane_id}.wait"
+                echo "done" > "$STATUS_DIR/panes/${session}_${pane_id}.status" 2>/dev/null
+            fi
             # Clear session-level wait if no pane waits remain
             local has_remaining=0
             for remaining in "$WAIT_DIR/${session}_"*.wait; do
@@ -1308,7 +1320,27 @@ action_park() {
         session_name="${target%%:*}"
         local pane_id="${target#*:}"
 
-        if [[ "$state" == "parked" ]]; then
+        if [[ "$pane_id" == w* ]]; then
+            # Window-level park: park/unpark all panes in this window
+            local win_idx="${pane_id#w}"
+            if [[ "$state" == "parked" ]]; then
+                while IFS= read -r wp_id; do
+                    [ -z "$wp_id" ] && continue
+                    rm -f "$PARKED_DIR/${session_name}_${wp_id}.parked"
+                    local pf="$STATUS_DIR/panes/${session_name}_${wp_id}.status"
+                    [ -f "$pf" ] && [ "$(cat "$pf")" = "parked" ] && echo "done" > "$pf"
+                done < <(tmux list-panes -t "${session_name}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
+                rm -f "$PARKED_DIR/${session_name}.parked"
+            else
+                mkdir -p "$PARKED_DIR"
+                while IFS= read -r wp_id; do
+                    [ -z "$wp_id" ] && continue
+                    : > "$PARKED_DIR/${session_name}_${wp_id}.parked"
+                    echo "parked" > "$STATUS_DIR/panes/${session_name}_${wp_id}.status"
+                    rm -f "$WAIT_DIR/${session_name}_${wp_id}.wait" 2>/dev/null
+                done < <(tmux list-panes -t "${session_name}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
+            fi
+        elif [[ "$state" == "parked" ]]; then
             # Unpark this pane
             rm -f "$PARKED_DIR/${session_name}_${pane_id}.parked"
             local pf="$STATUS_DIR/panes/${session_name}_${pane_id}.status"

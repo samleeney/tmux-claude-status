@@ -1220,7 +1220,10 @@ _selected_state() {
                 ;;
             P|Q)
                 if (( sidx == SELECTED )); then
-                    echo "agent-pane"
+                    # Return the actual pane/window status, not a generic tag
+                    local rest="${e#?|}" ; rest="${rest#*|}"
+                    rest="${rest#*|}" ; rest="${rest#*|}"
+                    echo "${rest%%|*}"
                     return
                 fi
                 ((sidx++))
@@ -1246,7 +1249,7 @@ action_wait() {
     local ttype="${SEL_TYPES[$SELECTED]}"
     local state
     state=$(_selected_state)
-    [[ "$state" == "noagent" || "$state" == "agent-pane" ]] && return
+    [[ "$state" == "noagent" ]] && return
 
     # Toggle: if already waiting, cancel wait
     if [[ "$state" == "wait" ]]; then
@@ -1313,7 +1316,7 @@ action_park() {
     local ttype="${SEL_TYPES[$SELECTED]}"
     local state
     state=$(_selected_state)
-    [[ "$state" == "noagent" || "$state" == "agent-pane" ]] && return
+    [[ "$state" == "noagent" ]] && return
 
     local session_name
     if [[ "$ttype" == "P" ]]; then

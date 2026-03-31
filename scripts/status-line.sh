@@ -3,27 +3,14 @@
 # Status line script for tmux status bar
 # Shows agent status across all sessions
 
-STATUS_DIR="$HOME/.cache/tmux-agent-status"
-PARKED_DIR="$STATUS_DIR/parked"
-LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/agent-processes.sh
-source "$SCRIPT_DIR/lib/agent-processes.sh"
-
-is_ssh_session() {
-    local session="$1"
-    if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
-        return 0
-    fi
-    case "$session" in
-        reachgpu) return 0 ;;
-        *) return 1 ;;
-    esac
-}
+# shellcheck source=lib/session-status.sh
+source "$SCRIPT_DIR/lib/session-status.sh"
+LAST_STATUS_FILE="/tmp/tmux-agent-last-status-summary"
 
 # Check and expire wait timers
 check_wait_timers() {
-    local wait_dir="$STATUS_DIR/wait"
+    local wait_dir="$WAIT_DIR"
     [ ! -d "$wait_dir" ] && return
     local current_time=$(date +%s)
     for wait_file in "$wait_dir"/*.wait; do
@@ -37,20 +24,6 @@ check_wait_timers() {
             rm -f "$wait_file"
         fi
     done
-}
-
-normalize_local_wait_status() {
-    local session="$1"
-    local status_file="$STATUS_DIR/${session}.status"
-    local wait_file="$STATUS_DIR/wait/${session}.wait"
-
-    [ ! -f "$status_file" ] && return
-
-    local status
-    status=$(cat "$status_file" 2>/dev/null || echo "")
-    if [ "$status" = "wait" ] && [ ! -f "$wait_file" ]; then
-        echo "done" > "$status_file" 2>/dev/null
-    fi
 }
 
 # Check for agent processes (Codex) via process polling
@@ -93,7 +66,7 @@ check_agent_processes() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
         local status_file="$STATUS_DIR/${session}.status"
-        local wait_file="$STATUS_DIR/wait/${session}.wait"
+        local wait_file="$WAIT_DIR/${session}.wait"
         local parked_file="$PARKED_DIR/${session}.parked"
         local codex_pid=""
 
@@ -136,6 +109,7 @@ count_agent_status() {
     local working=0
     local waiting=0
     local asking=0
+    local unread=0
     local done=0
     local total_agents=0
 
@@ -159,7 +133,14 @@ count_agent_status() {
             if [ -n "$status" ]; then
                 case "$status" in
                     "working") ((working++)); ((total_agents++)) ;;
-                    "done") ((done++)); ((total_agents++)) ;;
+                    "done")
+                        if [ -f "$STATUS_DIR/${session}.unread" ] || [ -f "$STATUS_DIR/${session}-remote.unread" ]; then
+                            ((unread++))
+                        else
+                            ((done++))
+                        fi
+                        ((total_agents++))
+                        ;;
                     "wait") ((waiting++)); ((total_agents++)) ;;
                     "ask") ((asking++)); ((total_agents++)) ;;
                 esac
@@ -186,7 +167,14 @@ count_agent_status() {
             if [ -n "$status" ]; then
                 case "$status" in
                     "working") ((working++)); ((total_agents++)) ;;
-                    "done") ((done++)); ((total_agents++)) ;;
+                    "done")
+                        if [ -f "$STATUS_DIR/${session}.unread" ] || [ -f "$STATUS_DIR/${session}-remote.unread" ]; then
+                            ((unread++))
+                        else
+                            ((done++))
+                        fi
+                        ((total_agents++))
+                        ;;
                     "wait") ((waiting++)); ((total_agents++)) ;;
                     "ask") ((asking++)); ((total_agents++)) ;;
                 esac
@@ -194,7 +182,7 @@ count_agent_status() {
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 
-    echo "$working:$waiting:$asking:$done:$total_agents"
+    echo "$working:$waiting:$asking:$unread:$done:$total_agents"
 }
 
 # Play notification sound
@@ -203,7 +191,7 @@ play_notification() {
 }
 
 # Get current status
-IFS=':' read -r working waiting asking done total_agents <<< "$(count_agent_status)"
+IFS=':' read -r working waiting asking unread done total_agents <<< "$(count_agent_status)"
 
 # Load previous status. Older versions stored only the working count; skip
 # notification diffing until we've written the new multi-count format once.
@@ -216,7 +204,7 @@ if [ -f "$LAST_STATUS_FILE" ]; then
 fi
 
 # Save current status counts
-echo "$working:$waiting:$asking:$done" > "$LAST_STATUS_FILE"
+echo "$working:$waiting:$asking:$unread:$done" > "$LAST_STATUS_FILE"
 
 # Check if any agent just finished (done count increased)
 if [ -n "$prev_done" ] && [ "$done" -gt "$prev_done" ]; then
@@ -250,6 +238,15 @@ format_asking_segment() {
     fi
 }
 
+format_unread_segment() {
+    local count="$1"
+    if [ "$count" -eq 1 ]; then
+        echo "#[fg=magenta,bold]! 1 unread#[default]"
+    else
+        echo "#[fg=magenta,bold]! $count unread#[default]"
+    fi
+}
+
 format_done_segment() {
     local count="$1"
     echo "#[fg=green]✓ $count done#[default]"
@@ -259,13 +256,14 @@ format_done_segment() {
 if [ "$total_agents" -eq 0 ]; then
     # No agent sessions
     echo ""
-elif [ "$working" -eq 0 ] && [ "$waiting" -eq 0 ] && [ "$asking" -eq 0 ] && [ "$done" -gt 0 ]; then
-    # All agents are done
+elif [ "$working" -eq 0 ] && [ "$waiting" -eq 0 ] && [ "$asking" -eq 0 ] && [ "$unread" -eq 0 ] && [ "$done" -gt 0 ]; then
+    # All agents are done (and read)
     echo "#[fg=green,bold]✓ All agents ready#[default]"
 else
     segments=()
     [ "$working" -gt 0 ] && segments+=("$(format_working_segment "$working")")
     [ "$asking" -gt 0 ] && segments+=("$(format_asking_segment "$asking")")
+    [ "$unread" -gt 0 ] && segments+=("$(format_unread_segment "$unread")")
     [ "$waiting" -gt 0 ] && segments+=("$(format_waiting_segment "$waiting")")
     [ "$done" -gt 0 ] && segments+=("$(format_done_segment "$done")")
     printf '%s\n' "${segments[*]}"

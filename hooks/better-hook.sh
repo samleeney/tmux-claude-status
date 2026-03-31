@@ -40,33 +40,43 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         HOOK_TYPE="$1"
         STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}.status"
         REMOTE_STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}-remote.status"
-        WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
-        PARKED_FILE="$STATUS_DIR/parked/${TMUX_SESSION}.parked"
+        WAIT_DIR="$STATUS_DIR/wait"
+        PARKED_DIR="$STATUS_DIR/parked"
+        mkdir -p "$WAIT_DIR" "$PARKED_DIR"
+        WAIT_FILE="$WAIT_DIR/${TMUX_SESSION}.wait"
+        PARKED_FILE="$PARKED_DIR/${TMUX_SESSION}.parked"
+
+        # Per-pane status tracking (for sidebar multi-agent display).
+        PANE_DIR="$STATUS_DIR/panes"
+        mkdir -p "$PANE_DIR"
+        PANE_ID="${TMUX_PANE:-}"
+        PANE_STATUS_FILE=""
+        [ -n "$PANE_ID" ] && PANE_STATUS_FILE="$PANE_DIR/${TMUX_SESSION}_${PANE_ID}.status"
 
         case "$HOOK_TYPE" in
             "UserPromptSubmit")
-                # User submitted a prompt — explicit interaction, unpark and cancel wait
+                # User submitted a prompt - explicit interaction, unpark and cancel wait.
                 if [ -f "$WAIT_FILE" ]; then
                     rm -f "$WAIT_FILE"
                 fi
-                if [ -f "$PARKED_FILE" ]; then
-                    rm -f "$PARKED_FILE"
+                if [ -f "$PARKED_FILE" ]; then rm -f "$PARKED_FILE"
                 fi
+                rm -f "$STATUS_DIR/${TMUX_SESSION}.unread" 2>/dev/null
                 echo "working" > "$STATUS_FILE"
+                [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
                 if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                    rm -f "$STATUS_DIR/${TMUX_SESSION}-remote.unread" 2>/dev/null
                     echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
                 fi
                 ;;
             "PreToolUse")
-                # Agent is calling a tool — check if it's asking the user a question
+                # Detect AskUserQuestion; respect explicit wait/park overrides.
                 TOOL_NAME=$(echo "$JSON_INPUT" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tool_name"[[:space:]]*:[[:space:]]*"//;s/"//')
-                if [ -f "$WAIT_FILE" ]; then
-                    rm -f "$WAIT_FILE"
-                fi
                 if [ "$TOOL_NAME" = "AskUserQuestion" ]; then
                     # Agent needs user input — distinct from "done" (agent stopped)
-                    if [ ! -f "$PARKED_FILE" ]; then
+                    if [ ! -f "$PARKED_FILE" ] && [ ! -f "$WAIT_FILE" ]; then
                         echo "ask" > "$STATUS_FILE"
+                        [ -n "$PANE_STATUS_FILE" ] && echo "ask" > "$PANE_STATUS_FILE"
                         if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                             echo "ask" > "$REMOTE_STATUS_FILE" 2>/dev/null
                         fi
@@ -75,35 +85,42 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                     fi
                 else
                     # Normal tool use — mark working but don't unpark
-                    if [ ! -f "$PARKED_FILE" ]; then
+                    if [ -f "$PARKED_FILE" ] || [ -f "$WAIT_FILE" ]; then
+                        :
+                    else
                         echo "working" > "$STATUS_FILE"
+                        [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
                         if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                             echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
                         fi
                     fi
                 fi
                 ;;
-            "Stop")
-                # Claude has finished responding (SubagentStop excluded - subagents finishing doesn't mean the main agent is done)
-                echo "done" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
-                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                fi
-                ;;
-            "Notification")
-                # Claude is waiting for user input — don't overwrite "ask" status
-                CURRENT_STATUS=$(cat "$STATUS_FILE" 2>/dev/null)
-                if [ "$CURRENT_STATUS" != "ask" ]; then
+            "Stop"|"Notification")
+                # Keep Notification from overwriting "ask"; mark unread if unattended.
+                PREV_STATUS=$(cat "$STATUS_FILE" 2>/dev/null || echo "")
+                if [ "$HOOK_TYPE" = "Notification" ] && [ "$PREV_STATUS" = "ask" ]; then
+                    :
+                else
                     echo "done" > "$STATUS_FILE"
+                    [ -n "$PANE_STATUS_FILE" ] && echo "done" > "$PANE_STATUS_FILE"
                     if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                         echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
                     fi
-                fi
+                    if [ "$PREV_STATUS" = "working" ]; then
+                        IS_ATTACHED=$(tmux list-sessions -F "#{session_name}:#{?session_attached,1,}" 2>/dev/null | grep -Fx "${TMUX_SESSION}:1" || true)
+                        if [ -z "$IS_ATTACHED" ]; then
+                            : > "$STATUS_DIR/${TMUX_SESSION}.unread"
+                            if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                                : > "$STATUS_DIR/${TMUX_SESSION}-remote.unread"
+                            fi
+                        fi
+                    fi
 
-                # Play notification sound when Claude finishes
-                SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-                "$SCRIPT_DIR/../scripts/play-sound.sh" 2>/dev/null &
+                    # Play notification sound when Claude finishes a turn.
+                    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+                    "$SCRIPT_DIR/../scripts/play-sound.sh" 2>/dev/null &
+                fi
                 ;;
         esac
     fi

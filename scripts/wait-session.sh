@@ -2,31 +2,12 @@
 
 # Put current session in wait mode with a timer
 
-STATUS_DIR="$HOME/.cache/tmux-agent-status"
-WAIT_DIR="$STATUS_DIR/wait"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/agent-processes.sh
-source "$SCRIPT_DIR/lib/agent-processes.sh"
+# shellcheck source=lib/session-status.sh
+source "$SCRIPT_DIR/lib/session-status.sh"
 
 # Get current session
 current_session=$(tmux display-message -p "#{session_name}")
-
-# Check if session has an agent
-has_agent_in_session() {
-    session_has_agent_process "$1"
-}
-
-# Check if session is SSH
-is_ssh_session() {
-    local session="$1"
-    if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
-        return 0
-    fi
-    case "$session" in
-        reachgpu) return 0 ;;
-        *) return 1 ;;
-    esac
-}
 
 # Check if session has an agent or is SSH session
 if ! has_agent_in_session "$current_session" && ! is_ssh_session "$current_session"; then

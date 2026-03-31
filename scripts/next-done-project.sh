@@ -1,143 +1,52 @@
 #!/usr/bin/env bash
 
-# Find and switch to the next 'done' project
+# Cycle through all done panes: current session first, then others.
+# Order: panes in current window → other windows → other sessions.
 
-STATUS_DIR="$HOME/.cache/tmux-agent-status"
-PARKED_DIR="$STATUS_DIR/parked"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/agent-processes.sh
-source "$SCRIPT_DIR/lib/agent-processes.sh"
+source "$SCRIPT_DIR/lib/session-status.sh"
 
-# Function to check if an agent is in a session
-has_agent_in_session() {
-    session_has_agent_process "$1"
-}
-
-# Function to check if session is SSH
-is_ssh_session() {
-    local session="$1"
-    if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
-        return 0
-    fi
-    case "$session" in
-        reachgpu) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-# Function to get agent status
-normalize_local_wait_status() {
-    local session="$1"
-    local status_file="$STATUS_DIR/${session}.status"
-    local wait_file="$STATUS_DIR/wait/${session}.wait"
-
-    [ ! -f "$status_file" ] && return
-
-    local status
-    status=$(cat "$status_file" 2>/dev/null || echo "")
-    if [ "$status" = "wait" ] && [ ! -f "$wait_file" ]; then
-        echo "done" > "$status_file" 2>/dev/null
-    fi
-}
-
-get_agent_status() {
-    local session="$1"
-
-    if [ -f "$PARKED_DIR/${session}.parked" ]; then
-        echo "parked"
-        return
-    fi
-
-    # Check for remote status file first (for SSH sessions)
-    local remote_status="$STATUS_DIR/${session}-remote.status"
-    if [ -f "$remote_status" ] && is_ssh_session "$session"; then
-        cat "$remote_status" 2>/dev/null
-        return
-    elif [ -f "$remote_status" ] && ! is_ssh_session "$session"; then
-        rm -f "$remote_status" 2>/dev/null
-    fi
-
-    # Check local status files
-    local status_file="$STATUS_DIR/${session}.status"
-    if [ -f "$status_file" ]; then
-        normalize_local_wait_status "$session"
-        cat "$status_file" 2>/dev/null || echo ""
-    else
-        echo ""
-    fi
-}
-
-# Get current session
+PANE_DIR="$STATUS_DIR/panes"
 current_session=$(tmux display-message -p "#{session_name}")
+current_window=$(tmux display-message -p "#{window_index}")
+current_pane=$(tmux display-message -p "#{pane_id}")
 
-# Check if we're being called with a session to exclude (from wait-session.sh)
-exclude_session="$1"
-
-# Collect all done sessions with their completion times
-done_sessions_with_times=()
-while IFS=: read -r name windows attached; do
-    # Check if an agent is present
-    agent_status=$(get_agent_status "$name")
-    has_agent=false
-
-    if has_agent_in_session "$name"; then
-        has_agent=true
-    elif [ -n "$agent_status" ] && is_ssh_session "$name"; then
-        # SSH session with remote status
-        has_agent=true
-    fi
-
-    if [ "$has_agent" = true ]; then
-        [ -z "$agent_status" ] && agent_status="done"
-
-        if { [ "$agent_status" = "done" ] || [ "$agent_status" = "ask" ]; } && [ "$name" != "$exclude_session" ]; then
-            # Get completion time from status file modification time
-            status_file=""
-            if is_ssh_session "$name"; then
-                status_file="$STATUS_DIR/${name}-remote.status"
-            else
-                status_file="$STATUS_DIR/${name}.status"
+# Collect done panes for a session in window/pane order.
+add_done_panes() {
+    local sess="$1"
+    for win in $(tmux list-windows -t "$sess" -F "#{window_index}" 2>/dev/null); do
+        while IFS= read -r pid; do
+            sf="$PANE_DIR/${sess}_${pid}.status"
+            if [ -f "$sf" ]; then
+                local st="$(<"$sf")"
+                { [ "$st" = "done" ] || [ "$st" = "ask" ]; } && targets+=("$sess:$win:$pid")
             fi
+        done < <(tmux list-panes -t "$sess:$win" -F "#{pane_id}" 2>/dev/null)
+    done
+}
 
-            completion_time=0
-            if [ -f "$status_file" ]; then
-                completion_time=$(stat -c %Y "$status_file" 2>/dev/null || echo 0)
-            fi
+targets=()
+add_done_panes "$current_session"
+for sess in $(tmux list-sessions -F "#{session_name}" 2>/dev/null | sort); do
+    [ "$sess" = "$current_session" ] && continue
+    add_done_panes "$sess"
+done
 
-            done_sessions_with_times+=("$completion_time:$name")
-        fi
-    fi
-done < <(tmux list-sessions -F "#{session_name}:#{session_windows}:#{?session_attached,(attached),}" 2>/dev/null || echo "")
-
-# Sort by completion time (most recent first) and extract session names
-IFS=$'\n' sorted_sessions=($(printf '%s\n' "${done_sessions_with_times[@]}" | sort -t: -k1,1nr | cut -d: -f2-))
-done_sessions=("${sorted_sessions[@]}")
-
-# If no done sessions, exit
-if [ ${#done_sessions[@]} -eq 0 ]; then
-    tmux display-message "No done projects found"
+if [ ${#targets[@]} -eq 0 ]; then
+    tmux display-message "No done panes"
     exit 1
 fi
 
-# Find current session index in done sessions
+# Find current position, pick next
 current_index=-1
-for i in "${!done_sessions[@]}"; do
-    if [ "${done_sessions[$i]}" = "$current_session" ]; then
+for i in "${!targets[@]}"; do
+    IFS=: read -r s w p <<< "${targets[$i]}"
+    [ "$s" = "$current_session" ] && [ "$w" = "$current_window" ] && [ "$p" = "$current_pane" ] && {
         current_index=$i
         break
-    fi
+    }
 done
+next_index=$(( (current_index + 1) % ${#targets[@]} ))
 
-# Calculate next index
-if [ $current_index -eq -1 ]; then
-    # Current session not in done list, switch to most recent done session
-    next_session="${done_sessions[0]}"
-else
-    # Switch to next done session (wrap around to most recent after last)
-    next_index=$(( (current_index + 1) % ${#done_sessions[@]} ))
-    next_session="${done_sessions[$next_index]}"
-fi
-
-# Switch to the next done session
-tmux switch-client -t "$next_session"
-tmux display-message "Switched to next done project: $next_session"
+IFS=: read -r sess win pane <<< "${targets[$next_index]}"
+tmux switch-client -t "$sess" \; select-window -t "$sess:$win" \; select-pane -t "$pane"

@@ -36,6 +36,12 @@ else
     echo "wait" > "$STATUS_DIR/${current_session}.status"
 fi
 
+# Also update per-pane status files so sidebar pane-level state stays consistent
+PANE_DIR="$STATUS_DIR/panes"
+for pf in "$PANE_DIR/${current_session}_"*.status; do
+    [ -f "$pf" ] && echo "wait" > "$pf"
+done
+
 tmux display-message "Session $current_session will wait for $wait_minutes minutes"
 
 # Switch to next done session or show completion message

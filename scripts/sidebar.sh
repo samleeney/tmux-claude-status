@@ -668,7 +668,7 @@ render() {
         buf+=" ${BOLD}/${RST}${SEARCH_QUERY}${DIM}▏${RST}\033[K\n"
     else
         buf+=" "
-        (( nw > 0 ))  && buf+="${BYEL}⚡${nw}${RST} "
+        (( nw > 0 ))  && buf+="${BYEL}${SPINNER_FRAMES[$SPINNER_TICK]}${nw}${RST} "
         (( nd > 0 ))  && buf+="${BGRN}✓${nd}${RST} "
         (( nwt > 0 )) && buf+="${BCYN}⏸${nwt}${RST} "
         (( nw + nd + nwt == 0 )) && buf+="${DIM}no agents${RST}"

@@ -667,11 +667,11 @@ render() {
     if (( SEARCH_ACTIVE )); then
         buf+=" ${BOLD}/${RST}${SEARCH_QUERY}${DIM}▏${RST}\033[K\n"
     else
-        local total=$((nw + nd + nwt))
-        buf+=" ${BOLD}Agents${RST} ${DIM}${total}${RST}  "
-        (( nd > 0 ))  && buf+="${BGRN}● ${nd}${RST} "
-        (( nw > 0 ))  && buf+="${BYEL}● ${nw}${RST} "
-        (( nwt > 0 )) && buf+="${BCYN}● ${nwt}${RST} "
+        buf+=" "
+        (( nw > 0 ))  && buf+="${BYEL}⚡${nw}${RST} "
+        (( nd > 0 ))  && buf+="${BGRN}✓${nd}${RST} "
+        (( nwt > 0 )) && buf+="${BCYN}⏸${nwt}${RST} "
+        (( nw + nd + nwt == 0 )) && buf+="${DIM}no agents${RST}"
         buf+="\033[K\n"
     fi
     ((line++))

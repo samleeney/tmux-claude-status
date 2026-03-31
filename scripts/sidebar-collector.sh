@@ -122,15 +122,21 @@ do_collect() {
         fi
     done
 
-    # 3. Agent process detection
+    # 3. Agent detection: running processes + panes with existing status files
     _AP_MAP_BUILT=0
     _build_agent_pid_map
+
+    # Track which panes we've already seen (to avoid duplicates)
+    local -A _seen_panes=()
+
     for sname in "${!sess_state[@]}"; do
+        # 3a. Detect running agent processes
         while IFS="$_tab" read -r pane_id ppid win_idx; do
             [ -z "$pane_id" ] && continue
             local agent_pid=""
             agent_pid=$(find_matching_descendant_pid "$ppid" "claude|codex" 2>/dev/null) || true
             if [ -n "$agent_pid" ]; then
+                _seen_panes["${sname}_${pane_id}"]=1
                 local agent_name="${_AP_ARGS[$agent_pid]:-agent}"
                 agent_name="${agent_name##*/}"
                 agent_name="${agent_name%% *}"
@@ -152,7 +158,29 @@ do_collect() {
                 fi
                 sess_agents[$sname]+="${pane_id}:${agent_name}:${pane_status} "
             fi
-        done < <(tmux list-panes -t "$sname" -F "#{pane_id}${_tab}#{pane_pid}${_tab}#{window_index}" 2>/dev/null)
+        done < <(tmux list-panes -s -t "$sname" -F "#{pane_id}${_tab}#{pane_pid}${_tab}#{window_index}" 2>/dev/null)
+
+        # 3b. Include panes with status files but no running process (finished agents)
+        for psf in "$STATUS_DIR/panes/${sname}_"*.status; do
+            [ -f "$psf" ] || continue
+            local bname
+            bname=$(basename "$psf" .status)
+            local pane_id="${bname#${sname}_}"
+            [[ -n "${_seen_panes[${sname}_${pane_id}]:-}" ]] && continue
+            # Verify pane still exists in tmux
+            tmux display-message -t "$pane_id" -p '' 2>/dev/null || continue
+            _seen_panes["${sname}_${pane_id}"]=1
+            local pane_status=$(<"$psf")
+            [ -f "$PARKED_DIR/${sname}_${pane_id}.parked" ] && pane_status="parked"
+            local pwf="$WAIT_DIR/${sname}_${pane_id}.wait"
+            if [ -f "$pwf" ]; then
+                local exp=$(<"$pwf")
+                if [ -n "$exp" ] && (( exp > now )); then
+                    pane_status="wait"
+                fi
+            fi
+            sess_agents[$sname]+="${pane_id}:agent:${pane_status} "
+        done
     done
 
     # 4. Recompute session states from agent data

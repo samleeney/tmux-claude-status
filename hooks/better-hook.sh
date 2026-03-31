@@ -16,21 +16,16 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
 
     # If that fails (e.g., when called from Claude hooks or over SSH)
     if [ -z "$TMUX_SESSION" ]; then
-        # For SSH sessions, try to auto-detect session name from the SSH connection
         if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-            # Use a simple heuristic: assume session name matches common SSH aliases
-            # Check if we're on known servers and map to likely session names
             case $(hostname -s) in
-                instance-*) TMUX_SESSION="reachgpu" ;;  # Your GPU server
+                instance-*) TMUX_SESSION="reachgpu" ;;
                 keen-schrodinger) TMUX_SESSION="sd1" ;;
                 sam-l4-workstation-image) TMUX_SESSION="l4-workstation" ;;
                 persistent-faraday) TMUX_SESSION="tig" ;;
                 instance-20250620-122051) TMUX_SESSION="reachgpu" ;;
-                *) TMUX_SESSION=$(hostname -s) ;;       # Default to hostname
+                *) TMUX_SESSION=$(hostname -s) ;;
             esac
         else
-            # TMUX format: /tmp/tmux-1000/default,3847,10
-            # Extract session name from socket path
             SOCKET_PATH=$(echo "$TMUX" | cut -d',' -f1)
             TMUX_SESSION=$(basename "$SOCKET_PATH")
         fi
@@ -44,23 +39,76 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
         PARKED_DIR="$STATUS_DIR/parked"
         mkdir -p "$WAIT_DIR" "$PARKED_DIR"
         WAIT_FILE="$WAIT_DIR/${TMUX_SESSION}.wait"
-        PARKED_FILE="$PARKED_DIR/${TMUX_SESSION}.parked"
+        SESSION_PARKED_FILE="$PARKED_DIR/${TMUX_SESSION}.parked"
 
-        # Per-pane status tracking (for sidebar multi-agent display).
+        # Per-pane status tracking
         PANE_DIR="$STATUS_DIR/panes"
         mkdir -p "$PANE_DIR"
         PANE_ID="${TMUX_PANE:-}"
         PANE_STATUS_FILE=""
-        [ -n "$PANE_ID" ] && PANE_STATUS_FILE="$PANE_DIR/${TMUX_SESSION}_${PANE_ID}.status"
+        PANE_PARKED_FILE=""
+        PANE_WAIT_FILE=""
+        if [ -n "$PANE_ID" ]; then
+            PANE_STATUS_FILE="$PANE_DIR/${TMUX_SESSION}_${PANE_ID}.status"
+            PANE_PARKED_FILE="$PARKED_DIR/${TMUX_SESSION}_${PANE_ID}.parked"
+            PANE_WAIT_FILE="$WAIT_DIR/${TMUX_SESSION}_${PANE_ID}.wait"
+        fi
+
+        # Check if the current pane is parked (either session-level or pane-level).
+        _pane_is_parked() {
+            [ -f "$SESSION_PARKED_FILE" ] && return 0
+            [ -n "$PANE_PARKED_FILE" ] && [ -f "$PANE_PARKED_FILE" ] && return 0
+            return 1
+        }
+
+        # Hierarchical unpark for the current pane:
+        #   Session parked → unpark entire session (all panes)
+        #   Window parked (all panes in window parked) → unpark all panes in window
+        #   Pane parked → unpark just this pane
+        _unpark_current() {
+            if [ -f "$SESSION_PARKED_FILE" ]; then
+                # Session-level park: unpark everything
+                rm -f "$SESSION_PARKED_FILE"
+                rm -f "$PARKED_DIR/${TMUX_SESSION}_"*.parked 2>/dev/null
+                # Reset all pane statuses from "parked" to "done"
+                for pf in "$PANE_DIR/${TMUX_SESSION}_"*.status; do
+                    [ -f "$pf" ] && [ "$(cat "$pf")" = "parked" ] && echo "done" > "$pf"
+                done
+            elif [ -n "$PANE_PARKED_FILE" ] && [ -f "$PANE_PARKED_FILE" ]; then
+                # Check if all panes in current window are parked (window-level park)
+                local cur_window
+                cur_window=$(tmux display-message -p '#{window_index}' 2>/dev/null)
+                local all_parked=1
+                while IFS= read -r wp_id; do
+                    [ -z "$wp_id" ] && continue
+                    if [ ! -f "$PARKED_DIR/${TMUX_SESSION}_${wp_id}.parked" ]; then
+                        all_parked=0
+                        break
+                    fi
+                done < <(tmux list-panes -t "${TMUX_SESSION}:${cur_window}" -F '#{pane_id}' 2>/dev/null)
+
+                if [ "$all_parked" -eq 1 ] && [ -n "$cur_window" ]; then
+                    # Window-level: unpark all panes in this window
+                    while IFS= read -r wp_id; do
+                        [ -z "$wp_id" ] && continue
+                        rm -f "$PARKED_DIR/${TMUX_SESSION}_${wp_id}.parked"
+                        local wpf="$PANE_DIR/${TMUX_SESSION}_${wp_id}.status"
+                        [ -f "$wpf" ] && [ "$(cat "$wpf")" = "parked" ] && echo "done" > "$wpf"
+                    done < <(tmux list-panes -t "${TMUX_SESSION}:${cur_window}" -F '#{pane_id}' 2>/dev/null)
+                else
+                    # Pane-level: unpark just this pane
+                    rm -f "$PANE_PARKED_FILE"
+                fi
+                # Reset pane status from "parked"
+                [ -n "$PANE_STATUS_FILE" ] && [ -f "$PANE_STATUS_FILE" ] && [ "$(cat "$PANE_STATUS_FILE")" = "parked" ] && echo "done" > "$PANE_STATUS_FILE"
+            fi
+        }
 
         case "$HOOK_TYPE" in
             "UserPromptSubmit")
-                # User submitted a prompt - explicit interaction, unpark and cancel wait.
-                if [ -f "$WAIT_FILE" ]; then
-                    rm -f "$WAIT_FILE"
-                fi
-                if [ -f "$PARKED_FILE" ]; then rm -f "$PARKED_FILE"
-                fi
+                # User submitted a prompt — explicit interaction, unpark and cancel wait.
+                _unpark_current
+                rm -f "$WAIT_FILE" "$PANE_WAIT_FILE"
                 rm -f "$STATUS_DIR/${TMUX_SESSION}.unread" 2>/dev/null
                 echo "working" > "$STATUS_FILE"
                 [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
@@ -73,8 +121,7 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 # Detect AskUserQuestion; respect explicit wait/park overrides.
                 TOOL_NAME=$(echo "$JSON_INPUT" | grep -o '"tool_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tool_name"[[:space:]]*:[[:space:]]*"//;s/"//')
                 if [ "$TOOL_NAME" = "AskUserQuestion" ]; then
-                    # Agent needs user input — distinct from "done" (agent stopped)
-                    if [ ! -f "$PARKED_FILE" ] && [ ! -f "$WAIT_FILE" ]; then
+                    if ! _pane_is_parked && [ ! -f "$PANE_WAIT_FILE" ] && [ ! -f "$WAIT_FILE" ]; then
                         echo "ask" > "$STATUS_FILE"
                         [ -n "$PANE_STATUS_FILE" ] && echo "ask" > "$PANE_STATUS_FILE"
                         if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
@@ -84,10 +131,8 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                         "$SCRIPT_DIR/../scripts/play-sound.sh" ask 2>/dev/null &
                     fi
                 else
-                    # Normal tool use — mark working but don't unpark
-                    if [ -f "$PARKED_FILE" ] || [ -f "$WAIT_FILE" ]; then
-                        :
-                    else
+                    # Normal tool use — mark working but don't touch parked/waited panes
+                    if ! _pane_is_parked && [ ! -f "$PANE_WAIT_FILE" ] && [ ! -f "$WAIT_FILE" ]; then
                         echo "working" > "$STATUS_FILE"
                         [ -n "$PANE_STATUS_FILE" ] && echo "working" > "$PANE_STATUS_FILE"
                         if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
@@ -97,29 +142,32 @@ if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
                 fi
                 ;;
             "Stop"|"Notification")
-                # Keep Notification from overwriting "ask"; mark unread if unattended.
-                PREV_STATUS=$(cat "$STATUS_FILE" 2>/dev/null || echo "")
-                if [ "$HOOK_TYPE" = "Notification" ] && [ "$PREV_STATUS" = "ask" ]; then
+                # Don't overwrite parked panes. Keep Notification from overwriting "ask".
+                if _pane_is_parked; then
                     :
                 else
-                    echo "done" > "$STATUS_FILE"
-                    [ -n "$PANE_STATUS_FILE" ] && echo "done" > "$PANE_STATUS_FILE"
-                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                        echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                    fi
-                    if [ "$PREV_STATUS" = "working" ]; then
-                        IS_ATTACHED=$(tmux list-sessions -F "#{session_name}:#{?session_attached,1,}" 2>/dev/null | grep -Fx "${TMUX_SESSION}:1" || true)
-                        if [ -z "$IS_ATTACHED" ]; then
-                            : > "$STATUS_DIR/${TMUX_SESSION}.unread"
-                            if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                                : > "$STATUS_DIR/${TMUX_SESSION}-remote.unread"
+                    PREV_STATUS=$(cat "$STATUS_FILE" 2>/dev/null || echo "")
+                    if [ "$HOOK_TYPE" = "Notification" ] && [ "$PREV_STATUS" = "ask" ]; then
+                        :
+                    else
+                        echo "done" > "$STATUS_FILE"
+                        [ -n "$PANE_STATUS_FILE" ] && echo "done" > "$PANE_STATUS_FILE"
+                        if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                            echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
+                        fi
+                        if [ "$PREV_STATUS" = "working" ]; then
+                            IS_ATTACHED=$(tmux list-sessions -F "#{session_name}:#{?session_attached,1,}" 2>/dev/null | grep -Fx "${TMUX_SESSION}:1" || true)
+                            if [ -z "$IS_ATTACHED" ]; then
+                                : > "$STATUS_DIR/${TMUX_SESSION}.unread"
+                                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
+                                    : > "$STATUS_DIR/${TMUX_SESSION}-remote.unread"
+                                fi
                             fi
                         fi
-                    fi
 
-                    # Play notification sound when Claude finishes a turn.
-                    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-                    "$SCRIPT_DIR/../scripts/play-sound.sh" 2>/dev/null &
+                        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+                        "$SCRIPT_DIR/../scripts/play-sound.sh" 2>/dev/null &
+                    fi
                 fi
                 ;;
         esac

@@ -11,18 +11,44 @@ current_session=$(tmux display-message -p "#{session_name}")
 current_window=$(tmux display-message -p "#{window_index}")
 current_pane=$(tmux display-message -p "#{pane_id}")
 
+# Check if a session has per-pane status files.
+session_has_pane_status() {
+    local sess="$1"
+    for f in "$PANE_DIR/${sess}_"*.status; do
+        [ -f "$f" ] && return 0
+    done
+    return 1
+}
+
 # Collect done panes for a session in window/pane order.
+# Falls back to session-level status when no per-pane files exist.
 add_done_panes() {
     local sess="$1"
-    for win in $(tmux list-windows -t "$sess" -F "#{window_index}" 2>/dev/null); do
-        while IFS= read -r pid; do
-            sf="$PANE_DIR/${sess}_${pid}.status"
-            if [ -f "$sf" ]; then
-                local st="$(<"$sf")"
-                { [ "$st" = "done" ] || [ "$st" = "ask" ]; } && targets+=("$sess:$win:$pid")
-            fi
-        done < <(tmux list-panes -t "$sess:$win" -F "#{pane_id}" 2>/dev/null)
-    done
+
+    if session_has_pane_status "$sess"; then
+        # Per-pane: check each pane's individual status file
+        for win in $(tmux list-windows -t "$sess" -F "#{window_index}" 2>/dev/null); do
+            while IFS= read -r pid; do
+                sf="$PANE_DIR/${sess}_${pid}.status"
+                if [ -f "$sf" ]; then
+                    local st="$(<"$sf")"
+                    { [ "$st" = "done" ] || [ "$st" = "ask" ]; } && targets+=("$sess:$win:$pid")
+                fi
+            done < <(tmux list-panes -t "$sess:$win" -F "#{pane_id}" 2>/dev/null)
+        done
+    else
+        # Session-level fallback: use session status file
+        local sf="$STATUS_DIR/${sess}.status"
+        [ -f "$sf" ] || return
+        local st="$(<"$sf")"
+        { [ "$st" = "done" ] || [ "$st" = "ask" ]; } || return
+        # Skip parked sessions
+        [ -f "$PARKED_DIR/${sess}.parked" ] && return
+        # Target the first window/pane of this session
+        local first
+        first=$(tmux list-panes -t "$sess" -F "#{window_index}:#{pane_id}" 2>/dev/null | head -1)
+        [ -n "$first" ] && targets+=("$sess:${first%%:*}:${first#*:}")
+    fi
 }
 
 targets=()

@@ -810,7 +810,7 @@ render() {
                 working) _ic="$YEL"; _icon="${SPINNER_FRAMES[$SPINNER_TICK]}" ;;
                 done)    _ic="$GRN"; _icon="✓" ;;
                 wait)    _ic="$CYN"; _icon="⏸" ;;
-                parked)  _ic="$GRY"; _icon="≡" ;;
+                parked)  _ic="$GRY"; _icon="P" ;;
                 *)       _ic="$GRY"; _icon="·" ;;
             esac
         }
@@ -1262,27 +1262,65 @@ action_wait() {
 
 action_park() {
     (( SEL_COUNT == 0 )) && return
-    local target
-    target=$(_selected_session)
+    local target="${SEL_NAMES[$SELECTED]}"
+    local ttype="${SEL_TYPES[$SELECTED]}"
     local state
     state=$(_selected_state)
     [[ "$state" == "noagent" || "$state" == "agent-pane" ]] && return
 
-    if [[ "$state" == "parked" ]]; then
-        rm -f "$PARKED_DIR/${target}.parked"
-        if [ -f "$STATUS_DIR/${target}-remote.status" ]; then
-            echo "done" > "$STATUS_DIR/${target}-remote.status"
+    local session_name
+    if [[ "$ttype" == "P" ]]; then
+        session_name="${target%%:*}"
+        local pane_id="${target#*:}"
+
+        if [[ "$state" == "parked" ]]; then
+            # Unpark this pane
+            rm -f "$PARKED_DIR/${session_name}_${pane_id}.parked"
+            local pf="$STATUS_DIR/panes/${session_name}_${pane_id}.status"
+            [ -f "$pf" ] && echo "done" > "$pf"
+            # If session was fully parked, remove session marker too
+            rm -f "$PARKED_DIR/${session_name}.parked"
         else
-            echo "done" > "$STATUS_DIR/${target}.status"
+            # Park this pane
+            mkdir -p "$PARKED_DIR"
+            rm -f "$WAIT_DIR/${session_name}_${pane_id}.wait" 2>/dev/null
+            : > "$PARKED_DIR/${session_name}_${pane_id}.parked"
+            local pf="$STATUS_DIR/panes/${session_name}_${pane_id}.status"
+            [ -f "$pf" ] && echo "parked" > "$pf"
         fi
     else
-        mkdir -p "$PARKED_DIR"
-        rm -f "$WAIT_DIR/${target}.wait"
-        : > "$PARKED_DIR/${target}.parked"
-        if [ -f "$STATUS_DIR/${target}-remote.status" ]; then
-            echo "parked" > "$STATUS_DIR/${target}-remote.status"
+        # Session-level park/unpark
+        session_name="$target"
+        if [[ "$state" == "parked" ]]; then
+            rm -f "$PARKED_DIR/${session_name}.parked"
+            rm -f "$PARKED_DIR/${session_name}_"*.parked 2>/dev/null
+            if [ -f "$STATUS_DIR/${session_name}-remote.status" ]; then
+                echo "done" > "$STATUS_DIR/${session_name}-remote.status"
+            else
+                echo "done" > "$STATUS_DIR/${session_name}.status"
+            fi
+            for pf in "$STATUS_DIR/panes/${session_name}_"*.status; do
+                [ -f "$pf" ] && [ "$(cat "$pf")" = "parked" ] && echo "done" > "$pf"
+            done
         else
-            echo "parked" > "$STATUS_DIR/${target}.status"
+            mkdir -p "$PARKED_DIR"
+            rm -f "$WAIT_DIR/${session_name}.wait"
+            : > "$PARKED_DIR/${session_name}.parked"
+            if [ -f "$STATUS_DIR/${session_name}-remote.status" ]; then
+                echo "parked" > "$STATUS_DIR/${session_name}-remote.status"
+            else
+                echo "parked" > "$STATUS_DIR/${session_name}.status"
+            fi
+            # Park all panes
+            for pf in "$STATUS_DIR/panes/${session_name}_"*.status; do
+                [ -f "$pf" ] || continue
+                local pid
+                pid=$(basename "$pf" .status)
+                pid="${pid#${session_name}_}"
+                : > "$PARKED_DIR/${session_name}_${pid}.parked"
+                echo "parked" > "$pf"
+                rm -f "$WAIT_DIR/${session_name}_${pid}.wait" 2>/dev/null
+            done
         fi
     fi
     _LAST_STATUS_MTIME=""

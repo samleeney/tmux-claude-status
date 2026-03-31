@@ -25,11 +25,15 @@ else
     echo "parked" > "$STATUS_DIR/${current_session}.status"
 fi
 
-# Also update per-pane status files so sidebar pane-level state stays consistent
+# Create per-pane parked markers and status so pane-level state stays consistent
 PANE_DIR="$STATUS_DIR/panes"
-for pf in "$PANE_DIR/${current_session}_"*.status; do
-    [ -f "$pf" ] && echo "parked" > "$pf"
-done
+mkdir -p "$PANE_DIR"
+while IFS= read -r pane_id; do
+    [ -z "$pane_id" ] && continue
+    : > "$PARKED_DIR/${current_session}_${pane_id}.parked"
+    echo "parked" > "$PANE_DIR/${current_session}_${pane_id}.status"
+    rm -f "$WAIT_DIR/${current_session}_${pane_id}.wait" 2>/dev/null
+done < <(tmux list-panes -t "$current_session" -F '#{pane_id}' 2>/dev/null)
 
 NEXT_DONE_SCRIPT="$SCRIPT_DIR/next-done-project.sh"
 if [ -f "$NEXT_DONE_SCRIPT" ]; then

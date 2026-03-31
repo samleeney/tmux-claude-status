@@ -84,6 +84,9 @@ tmux set-hook -ga session-created "run-shell '$CURRENT_DIR/scripts/daemon-monito
 # Auto-create sidebar in new sessions (small delay so the session is ready)
 tmux set-hook -ga session-created "run-shell -b 'sleep 0.5 && $CURRENT_DIR/scripts/sidebar-toggle.sh'"
 
+# Start sidebar data collector daemon (one per tmux server)
+"$CURRENT_DIR/scripts/sidebar-collector.sh" &
+
 # Also start it now if tmux is already running
 if tmux list-sessions >/dev/null 2>&1; then
     "$CURRENT_DIR/scripts/daemon-monitor.sh" >/dev/null 2>&1

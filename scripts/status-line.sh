@@ -94,36 +94,24 @@ check_agent_processes() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
         local status_file="$STATUS_DIR/${session}.status"
-        local wait_file="$WAIT_DIR/${session}.wait"
-        local parked_file="$PARKED_DIR/${session}.parked"
-        local codex_pid=""
 
+        # Skip sessions with explicit user overrides — only UserPromptSubmit unparks/unwaits.
+        [ -f "$PARKED_DIR/${session}.parked" ] && continue
+        [ -f "$WAIT_DIR/${session}.wait" ] && continue
+
+        local codex_pid=""
         codex_pid=$(find_session_codex_pid "$session" 2>/dev/null)
 
         if [ -n "$codex_pid" ]; then
             local current_status
-            if [ -f "$parked_file" ]; then
-                current_status="parked"
-            else
-                current_status=$(cat "$status_file" 2>/dev/null)
-            fi
+            current_status=$(cat "$status_file" 2>/dev/null)
             if [ -z "$current_status" ]; then
-                # No status file yet - first detection, assume working
                 echo "working" > "$status_file"
             elif codex_session_is_working "$codex_pid"; then
-                case "$current_status" in
-                    "done")
-                        echo "working" > "$status_file"
-                        ;;
-                    "wait")
-                        rm -f "$wait_file"
-                        echo "working" > "$status_file"
-                        ;;
-                    "parked")
-                        rm -f "$parked_file"
-                        echo "working" > "$status_file"
-                        ;;
-                esac
+                # Only auto-transition from done → working.
+                if [ "$current_status" = "done" ]; then
+                    echo "working" > "$status_file"
+                fi
             fi
         fi
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)

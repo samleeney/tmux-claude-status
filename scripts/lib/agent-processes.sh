@@ -20,6 +20,7 @@ _build_agent_pid_map() {
         ppid="${line%% *}"
         args="${line#* }"
         [ -z "$pid" ] && continue
+        [ -z "$ppid" ] && continue
         _AP_ARGS[$pid]="$args"
         _AP_CHILDREN[$ppid]+="$pid "
     done < <(ps -eo pid=,ppid=,args= 2>/dev/null)

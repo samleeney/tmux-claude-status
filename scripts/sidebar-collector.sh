@@ -8,20 +8,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/session-status.sh"
 
 CACHE_FILE="$STATUS_DIR/.sidebar-cache"
-LOCK_FILE="$STATUS_DIR/.sidebar-collector.lock"
 PID_FILE="$STATUS_DIR/.sidebar-collector.pid"
 
 # Ensure only one collector runs
 if [ -f "$PID_FILE" ]; then
     old_pid=$(cat "$PID_FILE" 2>/dev/null)
     if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-        exit 0  # already running
+        exit 0
     fi
 fi
 echo $$ > "$PID_FILE"
-trap 'rm -f "$PID_FILE" "$LOCK_FILE"' EXIT
+trap 'rm -f "$PID_FILE"' EXIT
 
-# ─── State priority ──────────────────────────────────────────────
 _state_pri() {
     case "$1" in
         working) echo 4 ;; done) echo 3 ;; ask) echo 3 ;;
@@ -29,47 +27,41 @@ _state_pri() {
     esac
 }
 
-# ─── Main collection loop ────────────────────────────────────────
-_last_mtime=""
-_tick=0
+_get_agent_arr() {
+    local session="$1"
+    local agents="${sess_agents[$session]:-}"
+    _agent_result=()
+    [ -z "$agents" ] && return
+    local seen=""
+    for ap in $agents; do
+        local pid="${ap%%:*}"
+        [[ " $seen " == *" $pid "* ]] && continue
+        seen+="$pid "
+        _agent_result+=("$ap")
+    done
+}
 
-while true; do
-    # Exit if tmux server is gone
-    tmux list-sessions >/dev/null 2>&1 || exit 0
-
-    # Change detection: skip if nothing changed (check every ~10 ticks = 10s)
-    (( ++_tick >= 10 )) && { _tick=0; _last_mtime=""; }
-    cur_mtime=$(stat -c %Y "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" 2>/dev/null)
-    if [[ "$cur_mtime" == "$_last_mtime" ]]; then
-        sleep 1
-        continue
-    fi
-    _last_mtime="$cur_mtime"
-
-    # ── Collect all data (mirrors sidebar.sh collect()) ──────────
-
-    local_tab=$'\t'
+do_collect() {
+    local _tab=$'\t'
     declare -A sess_state=() sess_extra=() sess_ssh=() sess_seen=()
     declare -A sess_agents=() pane_to_window=() window_names=()
     declare -A worktree_parent=() worktree_children=()
     declare -A repo_root_session=()
     declare -A PANE_COUNTS=()
-    local all_pane_pids=""
 
+    local now
     now=$(date +%s)
 
-    # 1+2. Session + pane data
-    while IFS="$local_tab" read -r sname pane_id cwd ppid win_idx win_name; do
+    # 1. Session + pane data
+    while IFS="$_tab" read -r sname pane_id cwd ppid win_idx win_name; do
         [ -z "$sname" ] && continue
         pane_to_window[$pane_id]="$win_idx"
         window_names["${sname}:${win_idx}"]="$win_name"
-        all_pane_pids+="$ppid "
 
         [[ -n "${sess_seen[$sname]:-}" ]] && continue
         sess_seen[$sname]=1
 
-        local state="noagent" extra="" is_ssh=""
-        local status=""
+        local state="noagent" extra="" is_ssh="" status=""
 
         if [ -f "$PARKED_DIR/${sname}.parked" ]; then
             status="parked"
@@ -100,15 +92,13 @@ while true; do
         sess_extra[$sname]="$extra"
         sess_ssh[$sname]="$is_ssh"
 
-        # Worktree detection
         if [[ "$cwd" != */.claude/worktrees/* ]]; then
             repo_root_session["$cwd"]="$sname"
         fi
-    done < <(tmux list-panes -a -F "#{session_name}${local_tab}#{pane_id}${local_tab}#{pane_current_path}${local_tab}#{pane_pid}${local_tab}#{window_index}${local_tab}#{window_name}" 2>/dev/null)
+    done < <(tmux list-panes -a -F "#{session_name}${_tab}#{pane_id}${_tab}#{pane_current_path}${_tab}#{pane_pid}${_tab}#{window_index}${_tab}#{window_name}" 2>/dev/null)
 
-    # Worktree parent detection (second pass)
+    # 2. Worktree parent detection
     for sname in "${!sess_state[@]}"; do
-        # Get cwd for this session
         local cwd
         cwd=$(tmux display-message -t "$sname" -p '#{pane_current_path}' 2>/dev/null) || continue
         if [[ "$cwd" == */.claude/worktrees/* ]]; then
@@ -132,10 +122,11 @@ while true; do
         fi
     done
 
-    # 3. Agent process detection (PID map already built by agent-processes.sh)
+    # 3. Agent process detection
+    _AP_MAP_BUILT=0
     _build_agent_pid_map
     for sname in "${!sess_state[@]}"; do
-        while IFS="$local_tab" read -r pane_id ppid win_idx; do
+        while IFS="$_tab" read -r pane_id ppid win_idx; do
             [ -z "$pane_id" ] && continue
             local agent_pid=""
             agent_pid=$(find_matching_descendant_pid "$ppid" "claude|codex" 2>/dev/null) || true
@@ -143,7 +134,6 @@ while true; do
                 local agent_name="${_AP_ARGS[$agent_pid]:-agent}"
                 agent_name="${agent_name##*/}"
                 agent_name="${agent_name%% *}"
-                # Per-pane status
                 local pane_status=""
                 local psf="$STATUS_DIR/panes/${sname}_${pane_id}.status"
                 if [ -f "$psf" ]; then
@@ -152,7 +142,6 @@ while true; do
                     pane_status="${sess_state[$sname]:-done}"
                     echo "$pane_status" > "$psf"
                 fi
-                # Check per-pane parked/wait
                 [ -f "$PARKED_DIR/${sname}_${pane_id}.parked" ] && pane_status="parked"
                 local pwf="$WAIT_DIR/${sname}_${pane_id}.wait"
                 if [ -f "$pwf" ]; then
@@ -163,10 +152,10 @@ while true; do
                 fi
                 sess_agents[$sname]+="${pane_id}:${agent_name}:${pane_status} "
             fi
-        done < <(tmux list-panes -t "$sname" -F "#{pane_id}${local_tab}#{pane_pid}${local_tab}#{window_index}" 2>/dev/null)
+        done < <(tmux list-panes -t "$sname" -F "#{pane_id}${_tab}#{pane_pid}${_tab}#{window_index}" 2>/dev/null)
     done
 
-    # 4. Recompute session states from per-pane agent data
+    # 4. Recompute session states from agent data
     for sname in "${!sess_agents[@]}"; do
         local agents="${sess_agents[$sname]}"
         local nw=0 nd=0 nwt=0 np=0 best_pri=-1 best_st="noagent"
@@ -200,26 +189,11 @@ while true; do
         eff_state[$parent]="$best"
     done
 
-    # ── 5. Build ENTRIES ──────────────────────────────────────────
-
-    _get_agent_arr() {
-        local session="$1"
-        local agents="${sess_agents[$session]:-}"
-        _agent_result=()
-        [ -z "$agents" ] && return
-        local seen=""
-        for ap in $agents; do
-            local pid="${ap%%:*}"
-            [[ " $seen " == *" $pid "* ]] && continue
-            seen+="$pid "
-            _agent_result+=("$ap")
-        done
-    }
-
+    # 5. Build ENTRIES
     ENTRIES=()
     SEL_NAMES=()
     SEL_TYPES=()
-    SESS_START=0
+    local SESS_START=0
 
     # INBOX
     local inbox=()
@@ -239,7 +213,6 @@ while true; do
             [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}|${pid}|${sname}/${aname}|done")
         done
     done
-    # Single-agent sessions not in sess_agents
     for sname in "${!sess_state[@]}"; do
         [[ -n "${sess_agents[$sname]:-}" ]] && continue
         [[ -f "$PARKED_DIR/${sname}.parked" ]] && continue
@@ -297,7 +270,6 @@ while true; do
                 SEL_NAMES+=("$wt")
                 SEL_TYPES+=("W")
 
-                # Agent panes under worktree child
                 _get_agent_arr "$wt"
                 local agents=("${_agent_result[@]}")
                 if (( ${#agents[@]} > 1 )); then
@@ -313,11 +285,9 @@ while true; do
                 fi
             done
 
-            # Agent panes under session
             _get_agent_arr "$sname"
             local agents=("${_agent_result[@]}")
             if (( ${#agents[@]} > 1 )); then
-                # Group by window
                 local -A _w_agents=() _w_seen=()
                 local -a _w_order=()
                 for ap in "${agents[@]}"; do
@@ -377,7 +347,7 @@ while true; do
         done
     fi
 
-    # ── Write cache ───────────────────────────────────────────────
+    # Write cache atomically
     {
         echo "TS:$(date +%s)"
         echo "SESS_START:$SESS_START"
@@ -392,6 +362,24 @@ while true; do
         done
     } > "${CACHE_FILE}.tmp"
     mv -f "${CACHE_FILE}.tmp" "$CACHE_FILE"
+}
+
+# ─── Main loop ────────────────────────────────────────────────────
+_last_mtime=""
+_tick=0
+
+while true; do
+    tmux list-sessions >/dev/null 2>&1 || exit 0
+
+    (( ++_tick >= 10 )) && { _tick=0; _last_mtime=""; }
+    cur_mtime=$(stat -c %Y "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" 2>/dev/null)
+    if [[ "$cur_mtime" == "$_last_mtime" ]]; then
+        sleep 1
+        continue
+    fi
+    _last_mtime="$cur_mtime"
+
+    do_collect
 
     sleep 1
 done

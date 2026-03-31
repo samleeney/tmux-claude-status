@@ -171,6 +171,19 @@ do_collect() {
         done
     done
 
+    # 3c. Clean up status/parked/wait files for sessions that no longer exist
+    for sf in "$STATUS_DIR"/*.status; do
+        [ -f "$sf" ] || continue
+        local sname
+        sname=$(basename "$sf" .status)
+        [[ "$sname" == *-remote ]] && continue
+        [[ -n "${sess_seen[$sname]:-}" ]] && continue
+        rm -f "$sf" "$STATUS_DIR/${sname}-remote.status"
+        rm -f "$PARKED_DIR/${sname}.parked" "$PARKED_DIR/${sname}_"*.parked
+        rm -f "$WAIT_DIR/${sname}.wait" "$WAIT_DIR/${sname}_"*.wait
+        rm -f "$STATUS_DIR/panes/${sname}_"*.status
+    done
+
     # 4. Recompute session states from agent data
     for sname in "${!sess_agents[@]}"; do
         local agents="${sess_agents[$sname]}"

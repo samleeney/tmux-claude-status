@@ -277,6 +277,8 @@ collect() {
     done
 
     # Find agent processes — only build PID map if agents exist.
+    # Track which panes have an active agent process THIS cycle.
+    declare -A _active_agent_panes=()
     local agent_lines
     agent_lines=$(pgrep -a "claude|codex" 2>/dev/null || true)
     if [[ -n "$agent_lines" ]]; then
@@ -296,12 +298,15 @@ collect() {
             local pid_id="${pane_to_id[$pane_pid]:-}"
 
             KNOWN_AGENTS["${owner}:${pid_id}"]="$agent_name"
+            _active_agent_panes["${owner}:${pid_id}"]=1
         done <<< "$agent_lines"
     fi
 
     # Build sess_agents: session → "pane_id:agent_name:status ..."
     # Read per-pane status files (written by hooks) when available,
     # fall back to session-level status.
+    # If a known pane has no active agent process and its status is
+    # "working", the agent exited without firing the Stop hook — fix it.
     local pane_dir="$STATUS_DIR/panes"
     declare -A sess_agents
     for key in "${!KNOWN_AGENTS[@]}"; do
@@ -314,6 +319,11 @@ collect() {
             pane_status=$(<"$pane_file")
         fi
         [ -z "$pane_status" ] && pane_status="${sess_state[$owner]:-done}"
+        # Fix stale "working" status when agent process is no longer running
+        if [[ "$pane_status" == "working" ]] && [[ -z "${_active_agent_panes[$key]:-}" ]]; then
+            pane_status="done"
+            [ -f "$pane_file" ] && echo "done" > "$pane_file" 2>/dev/null
+        fi
         sess_agents[$owner]+="${pid_id}:${agent_name}:${pane_status} "
     done
 
@@ -625,8 +635,8 @@ collect() {
 # ─── Render ───────────────────────────────────────────────────────
 render() {
     local W H
-    W=${COLUMNS:-$(tput cols 2>/dev/null || echo 30)}
-    H=${LINES:-$(tput lines 2>/dev/null || echo 24)}
+    read -r H W < <(stty size 2>/dev/null || echo "24 30")
+    W=${W:-30}; H=${H:-24}
 
     # In preview mode, session list takes left portion; preview takes right.
     local LW=$W  # list width

@@ -23,7 +23,7 @@ With [TPM](https://github.com/tmux-plugins/tpm):
 set -g @plugin 'samleeney/tmux-agent-status'
 ```
 
-Then `prefix + I` to install. Previously `tmux-claude-status`; the old name redirects automatically.
+Then `prefix + I` to install.
 
 ## Claude Code Setup
 
@@ -91,8 +91,6 @@ set -g @agent-next-done-key "n"
 set -g @agent-wait-key "w"
 set -g @agent-park-key "p"
 ```
-
-Old `@claude-*` options still work as fallbacks.
 
 ## Notification Sounds
 

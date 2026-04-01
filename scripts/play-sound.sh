@@ -2,7 +2,6 @@
 
 # Shared notification sound player for tmux-agent-status
 # Reads @agent-notification-sound from tmux options and plays the appropriate sound.
-# Falls back to @claude-notification-sound for backwards compatibility.
 # Usage: play-sound.sh [sound_type] [&]
 #   sound_type: "ask" for agent-asking sound, omit for normal notification
 
@@ -20,11 +19,9 @@ SOUND_TYPE="${1:-notify}"
 if [ "$SOUND_TYPE" = "ask" ]; then
     SOUND_CHOICE=$(tmux show-option -gqv @agent-ask-sound 2>/dev/null)
     [ -z "$SOUND_CHOICE" ] && SOUND_CHOICE=$(tmux show-option -gqv @agent-notification-sound 2>/dev/null)
-    [ -z "$SOUND_CHOICE" ] && SOUND_CHOICE=$(tmux show-option -gqv @claude-notification-sound 2>/dev/null)
     : "${SOUND_CHOICE:=bell}"
 else
     SOUND_CHOICE=$(tmux show-option -gqv @agent-notification-sound 2>/dev/null)
-    [ -z "$SOUND_CHOICE" ] && SOUND_CHOICE=$(tmux show-option -gqv @claude-notification-sound 2>/dev/null)
     : "${SOUND_CHOICE:=chime}"
 fi
 

@@ -35,11 +35,8 @@ case "${1:-}" in
         ;;
     list-panes)
         case "${5:-}" in
-            "#{pane_id}:#{pane_pid}")
-                echo "%0:200"
-                ;;
-            "#{pane_current_command}")
-                echo "zsh"
+            "#{pane_pid}")
+                echo "200"
                 ;;
             *)
                 exit 1
@@ -81,24 +78,15 @@ cat > "$FAKE_BIN/ps" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "${1:-}" != "-p" ] || [ "${3:-}" != "-o" ] || [ "${4:-}" != "args=" ]; then
+if [ "${1:-}" != "-eo" ] || [ "${2:-}" != "pid=,ppid=,args=" ]; then
     exit 1
 fi
 
-case "${2:-}" in
-    200)
-        echo "-zsh"
-        ;;
-    201)
-        echo "node"
-        ;;
-    202)
-        echo "claude --model opus"
-        ;;
-    *)
-        exit 1
-        ;;
-esac
+cat <<'OUT'
+200 1 -zsh
+201 200 node
+202 201 claude --model opus
+OUT
 EOF
 chmod +x "$FAKE_BIN/ps"
 

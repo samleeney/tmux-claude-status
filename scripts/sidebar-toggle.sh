@@ -8,9 +8,8 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIDEBAR_TITLE="agent-sidebar"
 TARGET="${1:-}"
 
-# Read configured width (with fallback chain)
+# Read configured width.
 width=$(tmux show-option -gqv "@agent-sidebar-width" 2>/dev/null)
-[ -z "$width" ] && width=$(tmux show-option -gqv "@claude-sidebar-width" 2>/dev/null)
 [ -z "$width" ] && width=40
 
 # Build -t flag for list-panes when a target is given.

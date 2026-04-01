@@ -2,7 +2,7 @@
 
 # Preview helper for fzf session switcher.
 # Extracted from inline --preview to handle edge cases cleanly.
-# Inspired by mchowning/tmux-claude-status.
+# Inspired by the original upstream preview helper workflow.
 
 input="$1"
 

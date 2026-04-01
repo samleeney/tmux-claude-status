@@ -2,7 +2,7 @@
 
 # Wrapper for window-based session switching (alternative to popup).
 # Opens the switcher in a tmux window and cleans up after selection.
-# Inspired by ianchesal/tmux-claude-status.
+# Inspired by the original upstream window-switcher workflow.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

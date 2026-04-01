@@ -21,10 +21,10 @@ case "${1:-}" in
         echo "codex-test"
         ;;
     list-panes)
-        echo "%1:4242"
+        echo "4242"
         ;;
     show-option)
-        if [ "${3:-}" = "@agent-notification-sound" ] || [ "${3:-}" = "@claude-notification-sound" ]; then
+        if [ "${3:-}" = "@agent-notification-sound" ]; then
             echo "none"
             exit 0
         fi
@@ -68,24 +68,20 @@ cat > "$FAKE_BIN/ps" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "${1:-}" != "-p" ] || [ "${3:-}" != "-o" ] || [ "${4:-}" != "args=" ]; then
+if [ "${1:-}" != "-eo" ] || [ "${2:-}" != "pid=,ppid=,args=" ]; then
     exit 1
 fi
 
-case "${2:-}" in
-    4242)
-        echo "-zsh"
-        ;;
-    5000)
-        echo "node /home/test/.nvm/versions/node/v24.12.0/bin/codex"
-        ;;
-    5001)
-        echo "/home/test/.nvm/versions/node/v24.12.0/lib/node_modules/@openai/codex/vendor/codex"
-        ;;
-    *)
-        exit 1
-        ;;
-esac
+cat <<'OUT'
+4242 1 -zsh
+5000 4242 node /home/test/.nvm/versions/node/v24.12.0/bin/codex
+5001 5000 /home/test/.nvm/versions/node/v24.12.0/lib/node_modules/@openai/codex/vendor/codex
+OUT
+if [ "${PGREP_ACTIVE_WORK:-0}" = "1" ]; then
+cat <<'OUT'
+6000 5001 codex active task
+OUT
+fi
 EOF
 chmod +x "$FAKE_BIN/ps"
 

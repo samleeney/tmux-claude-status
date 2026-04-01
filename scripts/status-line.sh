@@ -58,7 +58,8 @@ normalize_local_wait_status() {
 #   1. Set initial "working" when no status file exists yet
 #   2. Transition from "done" to "working" (user started a new prompt)
 # The notify hook handles the "working" -> "done" transition.
-# We detect active work by checking if codex has child processes (sandbox/tools).
+# We detect active work by checking whether the deepest codex runner has
+# spawned subprocesses for sandbox/tool execution.
 find_session_codex_pid() {
     find_session_agent_pid "$1" "codex"
 }
@@ -84,8 +85,6 @@ codex_session_is_working() {
     worker_pid=$(get_deepest_codex_pid "$codex_pid")
     [ -z "$worker_pid" ] && return 1
 
-    # When Codex is handling a turn it spawns subprocesses under the deepest
-    # codex runner. When idle, the runner normally has no child processes.
     pgrep -P "$worker_pid" >/dev/null 2>&1
 }
 
@@ -109,7 +108,7 @@ check_agent_processes() {
             local current_status
             current_status=$(cat "$status_file" 2>/dev/null)
             if [ -z "$current_status" ]; then
-                # No status file yet - first detection, assume working
+                # No status file yet — headless session or first detection
                 echo "working" > "$status_file"
             elif codex_session_is_working "$codex_pid"; then
                 case "$current_status" in

@@ -41,8 +41,8 @@ case "${1:-}" in
     list-panes)
         # Return a pane with pid 300 for the parked session
         case "${5:-}" in
-            "#{pane_id}:#{pane_pid}")
-                echo "%0:300"
+            "#{pane_pid}")
+                echo "300"
                 ;;
             *)
                 exit 0
@@ -76,20 +76,13 @@ chmod +x "$FAKE_BIN/pgrep"
 
 cat > "$FAKE_BIN/ps" <<'EOF'
 #!/usr/bin/env bash
-if [ "${1:-}" != "-p" ] || [ "${3:-}" != "-o" ] || [ "${4:-}" != "args=" ]; then
+if [ "${1:-}" != "-eo" ] || [ "${2:-}" != "pid=,ppid=,args=" ]; then
     exit 1
 fi
-case "${2:-}" in
-    300)
-        echo "-zsh"
-        ;;
-    301)
-        echo "claude --model opus"
-        ;;
-    *)
-        exit 1
-        ;;
-esac
+cat <<'OUT'
+300 1 -zsh
+301 300 claude --model opus
+OUT
 EOF
 chmod +x "$FAKE_BIN/ps"
 

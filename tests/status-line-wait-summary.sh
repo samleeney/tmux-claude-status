@@ -25,7 +25,7 @@ case "${1:-}" in
         exit 0
         ;;
     show-option)
-        if [ "${3:-}" = "@agent-notification-sound" ] || [ "${3:-}" = "@claude-notification-sound" ]; then
+        if [ "${3:-}" = "@agent-notification-sound" ]; then
             echo "none"
             exit 0
         fi

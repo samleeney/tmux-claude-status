@@ -2,28 +2,17 @@
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# One-time cache directory migration
-OLD_DIR="$HOME/.cache/tmux-claude-status"
-NEW_DIR="$HOME/.cache/tmux-agent-status"
-if [ -d "$OLD_DIR" ] && [ ! -d "$NEW_DIR" ]; then
-    mv "$OLD_DIR" "$NEW_DIR"
-fi
-
 # Default key bindings
 default_switcher_key="S"
 default_next_done_key="N"
 default_wait_key="W"
 default_park_key="p"
 
-# Get user configuration or use defaults (check new @agent-* first, fall back to @claude-*)
+# Get user configuration or use defaults.
 switcher_key=$(tmux show-option -gqv "@agent-status-key")
-[ -z "$switcher_key" ] && switcher_key=$(tmux show-option -gqv "@claude-status-key")
 next_done_key=$(tmux show-option -gqv "@agent-next-done-key")
-[ -z "$next_done_key" ] && next_done_key=$(tmux show-option -gqv "@claude-next-done-key")
 wait_key=$(tmux show-option -gqv "@agent-wait-key")
-[ -z "$wait_key" ] && wait_key=$(tmux show-option -gqv "@claude-wait-key")
 park_key=$(tmux show-option -gqv "@agent-park-key")
-[ -z "$park_key" ] && park_key=$(tmux show-option -gqv "@claude-park-key")
 
 [ -z "$switcher_key" ] && switcher_key="$default_switcher_key"
 [ -z "$next_done_key" ] && next_done_key="$default_next_done_key"
@@ -36,12 +25,10 @@ switcher_style=$(tmux show-option -gqv "@agent-switcher-style")
 
 # Display method: "popup" (default, requires tmux 3.2+) or "window" (fallback)
 display_method=$(tmux show-option -gqv "@agent-status-display-method")
-[ -z "$display_method" ] && display_method=$(tmux show-option -gqv "@claude-status-display-method")
 [ -z "$display_method" ] && display_method="popup"
 
 # Sidebar key (used in "both" mode; in "sidebar" mode the main switcher key is used)
 sidebar_key=$(tmux show-option -gqv "@agent-sidebar-key")
-[ -z "$sidebar_key" ] && sidebar_key=$(tmux show-option -gqv "@claude-sidebar-key")
 [ -z "$sidebar_key" ] && sidebar_key="o"
 
 # Helper to bind the fzf switcher using the configured display method

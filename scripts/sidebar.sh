@@ -285,6 +285,12 @@ render() {
             local rest="${pending_group#G|}"
             local label="${rest%%|*}"
             local color="${rest#*|}"
+            # Map color names from cache to ANSI codes
+            case "$color" in
+                green) color="$BGRN" ;; gray) color="$GRY" ;;
+                yellow) color="$BYEL" ;; cyan) color="$BCYN" ;;
+                magenta) color="$BMAG" ;; *) ;;
+            esac
             render_lines+=("${color} ${label}${RST}")
             render_types+=("G")
             render_sel_indices+=("-1")

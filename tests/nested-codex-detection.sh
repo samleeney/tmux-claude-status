@@ -31,14 +31,14 @@ case "${1:-}" in
         esac
         ;;
     list-panes)
-        case "${5:-}" in
-            "#{pane_pid}")
-                echo "100"
-                ;;
-            *)
-                exit 1
-                ;;
-        esac
+        if [[ "$*" == *"-a"* ]]; then
+            tab=$'\t'
+            echo "wrapped-codex${tab}%0${tab}0${tab}zsh${tab}${tab}zsh"
+        elif [[ "${5:-}" == "#{pane_pid}" ]]; then
+            echo "100"
+        else
+            exit 1
+        fi
         ;;
     *)
         exit 1
@@ -105,7 +105,7 @@ run_status_line() {
 run_switcher() {
     PATH="$FAKE_BIN:$PATH" \
     HOME="$TEST_HOME" \
-    "$REPO_DIR/scripts/hook-based-switcher.sh" --no-fzf
+    "$REPO_DIR/scripts/hook-based-switcher.sh" --list
 }
 
 status_line_output="$(run_status_line)"
@@ -119,12 +119,9 @@ if ! printf '%s\n' "$switcher_output" | grep -Fq "wrapped-codex"; then
     echo "Assertion failed: switcher should include the wrapped Codex session" >&2
     exit 1
 fi
-if ! printf '%s\n' "$switcher_output" | grep -Fq "[done]"; then
-    echo "Assertion failed: switcher should treat wrapped Codex sessions as agents, not no-agent sessions" >&2
-    exit 1
-fi
-if printf '%s\n' "$switcher_output" | grep -Fq "[no agent]"; then
-    echo "Assertion failed: wrapped Codex sessions should not fall into the no-agent bucket" >&2
+# With no status file, the pane should show the neutral dot icon (no agent), not a status icon
+if printf '%s\n' "$switcher_output" | grep -q '✓'; then
+    echo "Assertion failed: cleared Codex session should not show done icon without status file" >&2
     exit 1
 fi
 

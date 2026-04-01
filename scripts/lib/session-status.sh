@@ -10,6 +10,8 @@ _SESSION_STATUS_LOADED=1
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 PARKED_DIR="$STATUS_DIR/parked"
 WAIT_DIR="$STATUS_DIR/wait"
+PANE_DIR="$STATUS_DIR/panes"
+mkdir -p "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" "$PANE_DIR"
 
 # Source process-detection helpers from the same lib directory.
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

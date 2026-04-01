@@ -86,9 +86,6 @@ update_ssh_status() {
             if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
                 rm -f "$wait_file"
             fi
-            if [ "$remote_status" = "working" ] && [ -f "$parked_file" ]; then
-                rm -f "$parked_file"
-            fi
             # Don't overwrite local wait or parked overrides.
             if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then
                 mv "$temp_file" "$STATUS_DIR/reachgpu-remote.status"
@@ -113,9 +110,6 @@ update_ssh_status() {
             if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
                 rm -f "$wait_file"
             fi
-            if [ "$remote_status" = "working" ] && [ -f "$parked_file" ]; then
-                rm -f "$parked_file"
-            fi
             # Don't overwrite local wait or parked overrides.
             if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then
                 mv "$temp_file" "$STATUS_DIR/tig-remote.status"
@@ -139,9 +133,6 @@ update_ssh_status() {
             # If remote agent is working, cancel local wait mode
             if [ "$remote_status" = "working" ] && [ -f "$wait_file" ]; then
                 rm -f "$wait_file"
-            fi
-            if [ "$remote_status" = "working" ] && [ -f "$parked_file" ]; then
-                rm -f "$parked_file"
             fi
             # Don't overwrite local wait or parked overrides.
             if [ ! -f "$wait_file" ] && [ ! -f "$parked_file" ]; then

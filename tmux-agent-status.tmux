@@ -34,20 +34,38 @@ park_key=$(tmux show-option -gqv "@agent-park-key")
 switcher_style=$(tmux show-option -gqv "@agent-switcher-style")
 [ -z "$switcher_style" ] && switcher_style="both"
 
+# Display method: "popup" (default, requires tmux 3.2+) or "window" (fallback)
+display_method=$(tmux show-option -gqv "@agent-status-display-method")
+[ -z "$display_method" ] && display_method=$(tmux show-option -gqv "@claude-status-display-method")
+[ -z "$display_method" ] && display_method="popup"
+
 # Sidebar key (used in "both" mode; in "sidebar" mode the main switcher key is used)
 sidebar_key=$(tmux show-option -gqv "@agent-sidebar-key")
 [ -z "$sidebar_key" ] && sidebar_key=$(tmux show-option -gqv "@claude-sidebar-key")
 [ -z "$sidebar_key" ] && sidebar_key="o"
 
+# Helper to bind the fzf switcher using the configured display method
+bind_fzf_switcher() {
+    local key="$1"
+    case "$display_method" in
+        "window")
+            tmux bind-key "$key" new-window -n "agent-status" "$CURRENT_DIR/scripts/sidebar.sh --preview"
+            ;;
+        "popup"|*)
+            tmux bind-key "$key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/sidebar.sh --preview"
+            ;;
+    esac
+}
+
 case "$switcher_style" in
     popup)
-        tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/sidebar.sh --preview"
+        bind_fzf_switcher "$switcher_key"
         ;;
     sidebar)
         tmux bind-key "$switcher_key" run-shell "$CURRENT_DIR/scripts/sidebar-toggle.sh"
         ;;
     both|*)
-        tmux bind-key "$switcher_key" display-popup -E -w 80% -h 70% "$CURRENT_DIR/scripts/sidebar.sh --preview"
+        bind_fzf_switcher "$switcher_key"
         tmux bind-key "$sidebar_key" run-shell "$CURRENT_DIR/scripts/sidebar-toggle.sh"
         ;;
 esac

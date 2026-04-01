@@ -1,106 +1,225 @@
 # tmux-agent-status
 
-AI agent session manager for tmux. Monitor and orchestrate multiple AI coding assistants (Claude Code, OpenAI Codex CLI, and custom agents) from your tmux status bar.
+Sidebar-first AI agent session manager for tmux. It gives each tmux session a persistent status sidebar, keeps a compact summary in the status line, and adds a flat `fzf` pane switcher for fast jumps across agent panes.
 
-Real-time status tracking, session switching, and notification sounds for multi-agent terminal workflows.
+Claude Code and Codex CLI are both integrated through hooks, so their states come from agent lifecycle events rather than fragile process polling. Custom agents can still integrate through status files or collector extensions.
 
-![tmux-agent-status screenshot](claude-working-done.png)
+[![tmux-agent-status demo screenshot](demo/full.png)](demo/full.mp4)
+
+Demo video: [`demo/full.mp4`](demo/full.mp4)
+
+## Features
+
+- Persistent sidebar in every tmux session
+- Flat `fzf` pane switcher for quick jumps
+- Hook-based Claude Code and Codex tracking
+- Wait and park modes for triaging work
+- Compact status-line summary with finish notifications
+- Works across multi-pane sessions, worktrees, and remote tmux sessions
 
 ## Supported Agents
 
-| Agent | Detection | Status |
-|-------|-----------|--------|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Anthropic) | Hook-based (4 events) | Stable |
-| [Codex CLI](https://github.com/openai/codex) (OpenAI / ChatGPT) | Process polling + notify | Experimental |
-| Custom (Aider, Cline, Copilot CLI, etc.) | Status files or process polling | Stable |
+| Agent | Integration | Status |
+|-------|-------------|--------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Hook-based via `hooks/better-hook.sh` | Stable |
+| [Codex CLI](https://github.com/openai/codex) | Hook-based via `hooks/codex-hook.sh` | Stable in plugin, hooks still experimental upstream |
+| Custom (Aider, Cline, Copilot CLI, etc.) | Status files or collector extensions | Stable |
 
-All agents can run **simultaneously** across tmux sessions, each tracked independently.
+All agent sessions can run simultaneously across tmux sessions and panes, each tracked independently.
 
 ## Install
 
 With [TPM](https://github.com/tmux-plugins/tpm):
+
 ```bash
 set -g @plugin 'samleeney/tmux-agent-status'
 ```
 
-Then `prefix + I` to install.
+Then press `prefix + I` to install.
+
+By default the plugin:
+
+- Appends the live summary to `status-right`
+- Starts the sidebar collector daemon
+- Auto-creates a sidebar in existing and new tmux sessions
+- Binds the popup switcher, wait, park, and next-ready actions
 
 ## Claude Code Setup
 
 Add hooks to `~/.claude/settings.json`:
+
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh UserPromptSubmit" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh UserPromptSubmit"
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "hooks": [{ "type": "command", "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh PreToolUse" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh PreToolUse"
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh Stop" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh Stop"
+          }
+        ]
+      }
     ],
     "Notification": [
-      { "hooks": [{ "type": "command", "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh Notification" }] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.config/tmux/plugins/tmux-agent-status/hooks/better-hook.sh Notification"
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Precise agent status via [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks). The AI reports its own state transitions.
+Claude Code state is tracked entirely through hooks, so the plugin gets precise working/done transitions directly from the agent.
 
-## OpenAI Codex CLI Setup (Experimental)
+## Codex CLI Setup
 
-Codex CLI (OpenAI's terminal AI agent) lacks full lifecycle hooks ([tracking issue](https://github.com/openai/codex/issues/2109), PRs [#2904](https://github.com/openai/codex/pull/2904), [#9796](https://github.com/openai/codex/pull/9796), [#11067](https://github.com/openai/codex/pull/11067)). This plugin uses a hybrid approach:
+tmux-agent-status supports official [Codex hooks](https://developers.openai.com/codex/hooks).
 
-- **"Working"**: Process polling (`pgrep`) checks every 1s for a running `codex` process
-- **"Done"**: Codex `notify` fires on agent turn completion
+Enable hooks in `~/.codex/config.toml`:
 
-Add to `~/.codex/config.toml`:
 ```toml
-notify = ["~/.config/tmux/plugins/tmux-agent-status/hooks/codex-notify.sh"]
+[features]
+codex_hooks = true
 ```
 
-When Codex ships proper event hooks, the plugin will upgrade to hook-based tracking.
+To enable Codex tracking globally, add `~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/codex-hook.sh SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/codex-hook.sh UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/codex-hook.sh PreToolUse"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/codex-hook.sh Stop"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex state is also hook-based. The handler marks the tmux session or pane `working` on `UserPromptSubmit` and `PreToolUse`, resets it to `done` on `Stop`, and seeds resumed sessions on `SessionStart`.
+
+This repo also ships a repo-local [`.codex/hooks.json`](.codex/hooks.json), so Codex can pick up the same hook handler automatically when you work inside `tmux-agent-status` itself.
 
 ## Custom Agent Integration
 
-Integrate any AI coding tool (Aider, Continue, Cursor, Cline, GitHub Copilot CLI, Goose, Amazon Q, Windsurf, or your own agent):
+Integrate any AI coding tool with either of these approaches:
 
-1. **Status files**: Write `working`, `done`, `wait`, or `parked` to `~/.cache/tmux-agent-status/<session>.status`
-2. **Process polling**: Add your process name to `check_agent_processes()` in `scripts/status-line.sh`
+1. Write `working`, `done`, or `wait` to `~/.cache/tmux-agent-status/<session>.status`
+2. For pane-level parking or per-pane state, write to `~/.cache/tmux-agent-status/panes/<session>_<pane>.status` and `~/.cache/tmux-agent-status/parked/<session>_<pane>.parked`
+3. Extend the collector scan in [`scripts/lib/collect.sh`](scripts/lib/collect.sh) if you want automatic process-based tracking
 
 ## Usage
 
+Default mode is sidebar-first:
+
+- Every tmux session gets a sidebar pane automatically
+- `prefix + S` opens the flat `fzf` pane switcher
+- `prefix + o` focuses or creates the sidebar in the current window
+
 | Key | Action |
 |-----|--------|
-| `prefix + S` | AI session manager: switcher grouped by agent state |
-| `prefix + N` | Jump to next idle AI session |
-| `prefix + W` | Snooze session (timed wait mode) |
-| `prefix + p` | Park session for later (switcher-only) |
+| `prefix + S` | Open the flat `fzf` pane switcher |
+| `prefix + o` | Focus or create the sidebar |
+| `prefix + N` | Jump to the next ready or done agent session |
+| `prefix + W` | Put the current session or pane into timed wait mode |
+| `prefix + p` | Park the current session or pane for later |
 
-The status bar shows live agent activity:
-- `⚡ agent working` / `⚡ 3 working ✓ 2 done` / `✓ All agents ready`
-- Parked sessions stay visible in the switcher but are hidden from the status bar counts.
+The status bar shows live activity:
 
-### Keybindings
+- `⚡ agent working`
+- `⚡ 3 working ⏸ 1 waiting ✓ 2 done`
+- `✓ All agents ready`
+
+Parked sessions stay visible in the sidebar and switcher, but are excluded from the status-line summary.
+
+## Configuration
 
 ```tmux
-set -g @agent-status-key "s"
-set -g @agent-next-done-key "n"
-set -g @agent-wait-key "w"
+set -g @agent-status-key "S"
+set -g @agent-sidebar-key "o"
+set -g @agent-next-done-key "N"
+set -g @agent-wait-key "W"
 set -g @agent-park-key "p"
+
+set -g @agent-switcher-style "both"        # popup | sidebar | both
+set -g @agent-status-display-method "popup" # popup | window
+set -g @agent-sidebar-width "40"
 ```
+
+`@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.
 
 ## Notification Sounds
 
-Plays when an AI agent finishes. Configure:
+Play a sound when an agent finishes:
 
 ```tmux
 set -g @agent-notification-sound "chime"
 ```
 
-Options: `chime` (default), `bell`, `fanfare`, `frog`, `speech` ("Agent ready" TTS), `none`.
+Options: `chime` (default), `bell`, `fanfare`, `frog`, `speech`, `none`.
 
 ## Multi-Agent Deploy
 
@@ -110,38 +229,50 @@ Launch parallel AI coding sessions with isolated git worktrees:
 bash ~/.config/tmux/plugins/tmux-agent-status/scripts/deploy-sessions.sh manifest.json
 ```
 
-Each session gets a `deploy/<name>` branch. The agent orchestrator tracks all spawned sessions automatically.
+Each session gets a `deploy/<name>` branch, and the plugin tracks the spawned sessions automatically.
 
 ## SSH Remote Sessions
 
-Monitor AI agents on remote machines (GPU servers, cloud VMs, dev boxes):
+Monitor AI agents on remote machines:
 
 ```bash
 ./setup-server.sh <session-name> <ssh-host>
 ```
 
-Works with GCP, AWS, Azure, Lambda Labs, or any SSH host.
+Works with cloud VMs, GPU boxes, and any SSH-accessible tmux host.
 
 ## How It Works
 
-```
-┌─────────────┐     hooks      ┌──────────────────┐
-│ Claude Code  ├──────────────►│                  │
-└─────────────┘                │  ~/.cache/        │     ┌──────────────┐
-                               │  tmux-agent-      ├────►│ tmux status  │
-┌─────────────┐  pgrep/notify  │  status/          │     │ bar (1s poll)│
-│ Codex CLI   ├──────────────►│  <session>.status  │     └──────────────┘
-└─────────────┘                │                  │
-                               │  "working"       │     ┌──────────────┐
-┌─────────────┐  status files  │  "done"          ├────►│ prefix + S   │
-│ Custom agent├──────────────►│  "wait"           │     │ switcher     │
-└─────────────┘                │  "parked"        │     └──────────────┘
-                               └──────────────────┘
+```text
+┌──────────────┐    hooks     ┌──────────────────────────┐
+│ Claude Code  ├─────────────►│ ~/.cache/tmux-agent-     │
+└──────────────┘              │ status/                  │
+                              │ <session>.status         │
+┌──────────────┐    hooks     │ panes/*.status           │
+│ Codex CLI    ├─────────────►│ wait/*.wait              │
+└──────────────┘              │ parked/*.parked          │
+                              └─────────────┬────────────┘
+┌──────────────┐ status files               │
+│ Custom agent ├────────────────────────────┘
+└──────────────┘
+                                            ▼
+                              ┌──────────────────────────┐
+                              │ sidebar-collector.sh     │
+                              │ writes shared cache and  │
+                              │ status summary           │
+                              └─────────────┬────────────┘
+                                            │
+                         ┌──────────────────┼──────────────────┐
+                         ▼                  ▼                  ▼
+                 ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+                 │ sidebar pane │   │ status line  │   │ fzf switcher │
+                 └──────────────┘   └──────────────┘   └──────────────┘
 ```
 
-- **Claude Code**: Hook-based. AI agent reports state transitions directly
-- **Codex CLI**: Hybrid. Process polling for "working", `notify` for "done"
-- **Session manager**: Groups sessions by agent state with live preview
+- Claude Code support is hook-based
+- Codex CLI support is hook-based
+- Custom agents can be file-based or process-detected
+- The sidebar is the main live view; the `fzf` switcher is the quick jump tool
 
 ## License
 

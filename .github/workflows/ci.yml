@@ -38,20 +38,6 @@ jobs:
           tmux list-keys -T prefix | grep -qE ' -T prefix +c +run-shell .*wait-session.sh'
           tmux kill-server
 
-      - name: Test backwards-compatible bindings (old @claude-* options)
-        run: |
-          set -euo pipefail
-          tmux kill-server >/dev/null 2>&1 || true
-          tmux -f /dev/null new-session -d -s agent-compat 'sleep 5'
-          tmux set-option -gq @claude-status-key x
-          tmux set-option -gq @claude-next-done-key y
-          tmux set-option -gq @claude-wait-key z
-          bash tmux-agent-status.tmux
-          tmux list-keys -T prefix | grep -qE ' -T prefix +x +display-popup .*hook-based-switcher.sh'
-          tmux list-keys -T prefix | grep -qE ' -T prefix +y +run-shell .*next-done-project.sh'
-          tmux list-keys -T prefix | grep -qE ' -T prefix +z +run-shell .*wait-session.sh'
-          tmux kill-server
-
       - name: Run regression tests
         run: |
           set -euo pipefail

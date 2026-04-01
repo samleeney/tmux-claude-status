@@ -287,7 +287,7 @@ render() {
             local color="${rest#*|}"
             # Map color names from cache to ANSI codes
             case "$color" in
-                green) color="$BGRN" ;; gray) color="$GRY" ;;
+                green) color="$BGRN" ;; gray) color="$DIM" ;;
                 yellow) color="$BYEL" ;; cyan) color="$BCYN" ;;
                 magenta) color="$BMAG" ;; *) ;;
             esac

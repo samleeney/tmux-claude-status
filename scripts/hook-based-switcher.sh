@@ -141,6 +141,9 @@ selected=$(get_pane_list | fzf \
     --no-sort \
     --no-preview \
     --prompt="  " \
+    --header=$'\033[90mctrl-j/k scroll  ctrl-r reset\033[0m' \
+    --header-first \
+    --bind="ctrl-j:down,ctrl-k:up" \
     --bind="ctrl-r:reload(bash '$0' --reset)" \
     --layout=reverse \
     --info=hidden \

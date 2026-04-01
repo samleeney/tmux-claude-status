@@ -39,7 +39,7 @@ bind_fzf_switcher() {
             tmux bind-key "$key" new-window -n "agent-status" "$CURRENT_DIR/scripts/hook-based-switcher.sh"
             ;;
         "popup"|*)
-            tmux bind-key "$key" display-popup -E -w 60 -h 14 -T " Switch Pane " -S fg=colour240 "$CURRENT_DIR/scripts/hook-based-switcher.sh"
+            tmux bind-key "$key" display-popup -E -w 60 -h 14 -T " Switch Pane " -S fg=colour250 -s fg=colour250 "$CURRENT_DIR/scripts/hook-based-switcher.sh"
             ;;
     esac
 }

@@ -5,6 +5,7 @@
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 PARKED_DIR="$STATUS_DIR/parked"
+PANE_DIR="$STATUS_DIR/panes"
 LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/agent-processes.sh
@@ -53,11 +54,21 @@ normalize_local_wait_status() {
     fi
 }
 
-# Check for agent processes (Codex) via process polling
-# Codex stays resident when idle, so we can only use process presence to:
-#   1. Set initial "working" when no status file exists yet
-#   2. Transition from "done" to "working" (user started a new prompt)
-# The notify hook handles the "working" -> "done" transition.
+session_has_pane_status() {
+    local session="$1"
+    local pane_file
+
+    for pane_file in "$PANE_DIR/${session}_"*.status; do
+        [ -f "$pane_file" ] && return 0
+    done
+
+    return 1
+}
+
+# Check for agent processes (Codex) via process polling.
+# Hook-managed sessions write per-pane status files, and those files are the
+# authoritative source once they exist. Polling is only a bootstrap fallback
+# for legacy or first-seen Codex sessions that do not have pane-level state yet.
 # We detect active work by checking whether the deepest codex runner has
 # spawned subprocesses for sandbox/tool execution.
 find_session_codex_pid() {
@@ -94,6 +105,7 @@ check_agent_processes() {
         local status_file="$STATUS_DIR/${session}.status"
         local wait_file="$STATUS_DIR/wait/${session}.wait"
         local parked_file="$PARKED_DIR/${session}.parked"
+        local current_status=""
         local codex_pid=""
 
         # Parking is an explicit user decision — never auto-unpark.
@@ -102,11 +114,14 @@ check_agent_processes() {
             continue
         fi
 
+        current_status=$(cat "$status_file" 2>/dev/null)
+        if session_has_pane_status "$session"; then
+            continue
+        fi
+
         codex_pid=$(find_session_codex_pid "$session" 2>/dev/null)
 
         if [ -n "$codex_pid" ]; then
-            local current_status
-            current_status=$(cat "$status_file" 2>/dev/null)
             if [ -z "$current_status" ]; then
                 # No status file yet — headless session or first detection
                 echo "working" > "$status_file"

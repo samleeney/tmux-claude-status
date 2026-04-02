@@ -10,7 +10,7 @@
 #     SESS_START, _COLLECT_TICK, _LAST_STATUS_MTIME
 #
 # Populates: ENTRIES[], SEL_NAMES[], SEL_TYPES[], PANE_COUNTS[], SESS_START
-# Persists across calls: KNOWN_AGENTS[], LIVE_PANES[]
+# Persists across calls: LIVE_PANES[]
 # Sets _COLLECT_CHANGED=1 when data was rebuilt, 0 when skipped (no changes).
 
 [[ -n "${_COLLECT_LIB_LOADED:-}" ]] && return 0
@@ -47,8 +47,8 @@ find_ancestor_pane() {
 # ─── State priority ───────────────────────────────────────────────
 _state_pri() {
     case "$1" in
-        done)    echo 5 ;; ask)     echo 4 ;; working) echo 3 ;;
-        wait)    echo 2 ;; parked)  echo 1 ;; *)       echo 0 ;;
+        working) echo 5 ;; wait)    echo 4 ;; ask)     echo 3 ;;
+        done)    echo 2 ;; parked)  echo 1 ;; *)       echo 0 ;;
     esac
 }
 
@@ -157,10 +157,23 @@ collect_data() {
         [ -n "$pid" ] && LIVE_PANES[$pid]=1
     done
 
-    # Prune known agents whose pane no longer exists.
-    for key in "${!KNOWN_AGENTS[@]}"; do
-        local pid="${key#*:}"
-        [[ -z "${LIVE_PANES[$pid]:-}" ]] && unset "KNOWN_AGENTS[$key]"
+    # Rebuild known agents each cycle from current detections plus persisted
+    # hook-written pane markers. This avoids stale in-memory agent identities
+    # when a pane stops running Claude/Codex but stays open.
+    KNOWN_AGENTS=()
+
+    local pane_dir="$STATUS_DIR/panes"
+    local agent_file=""
+    for agent_file in "$pane_dir/"*.agent; do
+        [ -f "$agent_file" ] || continue
+        local bname pid_id owner agent_name
+        bname=$(basename "$agent_file" .agent)
+        pid_id="${bname##*_}"
+        owner="${bname%_${pid_id}}"
+        [ -n "${LIVE_PANES[$pid_id]:-}" ] || continue
+        agent_name=$(<"$agent_file")
+        [ -n "$agent_name" ] || continue
+        KNOWN_AGENTS["${owner}:${pid_id}"]="$agent_name"
     done
 
     # Find agent processes — pgrep globally, walk UP to find owning pane.
@@ -187,7 +200,6 @@ collect_data() {
     fi
 
     # Build sess_agents from KNOWN_AGENTS + per-pane status files.
-    local pane_dir="$STATUS_DIR/panes"
     declare -A sess_agents
     for key in "${!KNOWN_AGENTS[@]}"; do
         local owner="${key%%:*}"
@@ -480,15 +492,22 @@ collect_data() {
         rm -f "$sf" "$STATUS_DIR/${sname}-remote.status"
         rm -f "$PARKED_DIR/${sname}.parked" "$PARKED_DIR/${sname}_"*.parked
         rm -f "$WAIT_DIR/${sname}.wait" "$WAIT_DIR/${sname}_"*.wait
-        rm -f "$STATUS_DIR/panes/${sname}_"*.status
+        rm -f "$STATUS_DIR/panes/${sname}_"*.status "$STATUS_DIR/panes/${sname}_"*.agent
     done
 
-    # Clean up pane status files for dead panes
+    # Clean up pane metadata for dead panes.
     for psf in "$STATUS_DIR/panes/"*.status; do
         [ -f "$psf" ] || continue
         local bname pid_id
         bname=$(basename "$psf" .status)
         pid_id="${bname##*_}"
         [[ -z "${LIVE_PANES[$pid_id]:-}" ]] && rm -f "$psf"
+    done
+    for paf in "$STATUS_DIR/panes/"*.agent; do
+        [ -f "$paf" ] || continue
+        local bname pid_id
+        bname=$(basename "$paf" .agent)
+        pid_id="${bname##*_}"
+        [[ -z "${LIVE_PANES[$pid_id]:-}" ]] && rm -f "$paf"
     done
 }

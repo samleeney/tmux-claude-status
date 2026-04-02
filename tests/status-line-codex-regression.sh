@@ -9,8 +9,9 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 TEST_HOME="$TMP_DIR/home"
 FAKE_BIN="$TMP_DIR/bin"
 STATUS_DIR="$TEST_HOME/.cache/tmux-agent-status"
+PANE_DIR="$STATUS_DIR/panes"
 
-mkdir -p "$FAKE_BIN" "$STATUS_DIR"
+mkdir -p "$FAKE_BIN" "$STATUS_DIR" "$PANE_DIR"
 
 cat > "$FAKE_BIN/tmux" <<'EOF'
 #!/usr/bin/env bash
@@ -118,6 +119,14 @@ idle_output="$(run_status_line 0)"
 idle_status="$(cat "$STATUS_DIR/codex-test.status")"
 assert_eq "done" "$idle_status" "idle Codex session should stay done"
 assert_eq "#[fg=green,bold]✓ All agents ready#[default]" "$idle_output" "idle Codex session should render as done"
+
+echo "done" > "$STATUS_DIR/codex-test.status"
+echo "done" > "$PANE_DIR/codex-test_%9.status"
+hook_output="$(run_status_line 1)"
+hook_status="$(cat "$STATUS_DIR/codex-test.status")"
+assert_eq "done" "$hook_status" "hook-tracked Codex sessions should not be reactivated by process polling"
+assert_eq "#[fg=green,bold]✓ All agents ready#[default]" "$hook_output" "hook-tracked done sessions should stay done in the status line"
+rm -f "$PANE_DIR/codex-test_%9.status"
 
 rm -f "$STATUS_DIR/codex-test.status"
 first_seen_output="$(run_status_line 0)"

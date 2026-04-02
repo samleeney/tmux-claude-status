@@ -1,100 +1,120 @@
 #!/usr/bin/env bash
 
 # Claude Code hook for tmux-agent-status
-# Updates tmux session status files based on Claude's working state
+# Updates tmux session and pane status files based on Claude's working state
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
-mkdir -p "$STATUS_DIR"
+PANE_DIR="$STATUS_DIR/panes"
+mkdir -p "$STATUS_DIR" "$PANE_DIR"
 
-# Read JSON from stdin (required by Claude Code hooks)
-JSON_INPUT=$(cat)
+# Drain JSON from stdin (required by Claude Code hooks).
+cat >/dev/null 2>&1 || true
 
-# Get tmux session if in tmux OR if we're in an SSH session
-if [ -n "$TMUX" ] || [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-    # Try to get session name via tmux command first
-    TMUX_SESSION=$(tmux display-message -p '#{session_name}' 2>/dev/null)
+in_remote_session() {
+    [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_TTY:-}" ]
+}
 
-    # If that fails (e.g., when called from Claude hooks or over SSH)
-    if [ -z "$TMUX_SESSION" ]; then
-        # For SSH sessions, try to auto-detect session name from the SSH connection
-        if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-            # Use a simple heuristic: assume session name matches common SSH aliases
-            # Check if we're on known servers and map to likely session names
-            case $(hostname -s) in
-                instance-*) TMUX_SESSION="reachgpu" ;;  # Your GPU server
-                keen-schrodinger) TMUX_SESSION="sd1" ;;
-                sam-l4-workstation-image) TMUX_SESSION="l4-workstation" ;;
-                persistent-faraday) TMUX_SESSION="tig" ;;
-                instance-20250620-122051) TMUX_SESSION="reachgpu" ;;
-                *) TMUX_SESSION=$(hostname -s) ;;       # Default to hostname
-            esac
-        else
-            # TMUX format: /tmp/tmux-1000/default,3847,10
-            # Extract session name from socket path
-            SOCKET_PATH=$(echo "$TMUX" | cut -d',' -f1)
-            TMUX_SESSION=$(basename "$SOCKET_PATH")
+get_tmux_session() {
+    local tmux_session=""
+
+    if [ -n "${TMUX:-}" ] || in_remote_session; then
+        tmux_session=$(tmux display-message -p '#{session_name}' 2>/dev/null)
+
+        if [ -z "$tmux_session" ]; then
+            if in_remote_session; then
+                case "$(hostname -s 2>/dev/null)" in
+                    instance-*) tmux_session="reachgpu" ;;
+                    keen-schrodinger) tmux_session="sd1" ;;
+                    sam-l4-workstation-image) tmux_session="l4-workstation" ;;
+                    persistent-faraday) tmux_session="tig" ;;
+                    instance-20250620-122051) tmux_session="reachgpu" ;;
+                    *) tmux_session=$(hostname -s 2>/dev/null) ;;
+                esac
+            elif [ -n "${TMUX:-}" ]; then
+                local socket_path="${TMUX%%,*}"
+                tmux_session=$(basename "$socket_path")
+            fi
         fi
     fi
 
-    if [ -n "$TMUX_SESSION" ]; then
-        HOOK_TYPE="$1"
-        STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}.status"
-        REMOTE_STATUS_FILE="$STATUS_DIR/${TMUX_SESSION}-remote.status"
-        WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
-        PARKED_FILE="$STATUS_DIR/parked/${TMUX_SESSION}.parked"
+    [ -n "$tmux_session" ] || return 1
+    printf '%s\n' "$tmux_session"
+}
 
-        case "$HOOK_TYPE" in
-            "UserPromptSubmit")
-                # User submitted a prompt — this is an explicit interaction, so
-                # cancel wait mode and unpark.
-                if [ -f "$WAIT_FILE" ]; then
-                    rm -f "$WAIT_FILE"
-                fi
-                if [ -f "$PARKED_FILE" ]; then
-                    rm -f "$PARKED_FILE"
-                fi
-                echo "working" > "$STATUS_FILE"
-                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                    echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                fi
-                ;;
-            "PreToolUse")
-                # Agent is calling a tool — mark working but do NOT unpark.
-                # Parking is an explicit user decision; only user interaction
-                # (UserPromptSubmit) should unpark.
-                if [ -f "$WAIT_FILE" ]; then
-                    rm -f "$WAIT_FILE"
-                fi
-                if [ ! -f "$PARKED_FILE" ]; then
-                    echo "working" > "$STATUS_FILE"
-                    if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                        echo "working" > "$REMOTE_STATUS_FILE" 2>/dev/null
+set_status() {
+    local tmux_session="$1"
+    local requested_status="$2"
+    local session_status="$requested_status"
+    local status_file="$STATUS_DIR/${tmux_session}.status"
+    local remote_status_file="$STATUS_DIR/${tmux_session}-remote.status"
+
+    if [ -n "${TMUX_PANE:-}" ]; then
+        local pane_file="$PANE_DIR/${tmux_session}_${TMUX_PANE}.status"
+        local agent_file="$PANE_DIR/${tmux_session}_${TMUX_PANE}.agent"
+        echo "$requested_status" > "$pane_file"
+        echo "claude" > "$agent_file"
+
+        session_status="done"
+        local existing_pane_file=""
+        for existing_pane_file in "$PANE_DIR/${tmux_session}_"*.status; do
+            [ -f "$existing_pane_file" ] || continue
+
+            local pane_status=""
+            pane_status=$(cat "$existing_pane_file" 2>/dev/null || echo "")
+            case "$pane_status" in
+                working)
+                    session_status="working"
+                    break
+                    ;;
+                wait)
+                    if [ "$session_status" != "working" ]; then
+                        session_status="wait"
                     fi
-                fi
-                ;;
-            "Stop")
-                # Claude has finished responding (SubagentStop excluded - subagents finishing doesn't mean the main agent is done)
-                echo "done" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
-                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                fi
-                ;;
-            "Notification")
-                # Claude is waiting for user input
-                echo "done" > "$STATUS_FILE"
-                # Only write to remote status file if we're in an SSH session
-                if [ -n "$SSH_CONNECTION" ] || [ -n "$SSH_TTY" ]; then
-                    echo "done" > "$REMOTE_STATUS_FILE" 2>/dev/null
-                fi
-
-                # Play notification sound when Claude finishes
-                SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-                "$SCRIPT_DIR/../scripts/play-sound.sh" 2>/dev/null &
-                ;;
-        esac
+                    ;;
+            esac
+        done
     fi
-fi
+
+    echo "$session_status" > "$status_file"
+    if in_remote_session; then
+        echo "$session_status" > "$remote_status_file" 2>/dev/null
+    fi
+}
+
+TMUX_SESSION=$(get_tmux_session) || exit 0
+HOOK_TYPE="${1:-}"
+WAIT_FILE="$STATUS_DIR/wait/${TMUX_SESSION}.wait"
+PARKED_FILE="$STATUS_DIR/parked/${TMUX_SESSION}.parked"
+
+case "$HOOK_TYPE" in
+    UserPromptSubmit)
+        # User submitted a prompt — this is an explicit interaction, so
+        # cancel wait mode and unpark.
+        rm -f "$WAIT_FILE" "$PARKED_FILE"
+        set_status "$TMUX_SESSION" "working"
+        ;;
+    PreToolUse)
+        # Agent is calling a tool — mark working but do NOT unpark.
+        # Parking is an explicit user decision; only user interaction
+        # (UserPromptSubmit) should unpark.
+        rm -f "$WAIT_FILE"
+        if [ ! -f "$PARKED_FILE" ]; then
+            set_status "$TMUX_SESSION" "working"
+        fi
+        ;;
+    Stop)
+        # Claude has finished responding (SubagentStop excluded - subagents
+        # finishing doesn't mean the main agent is done).
+        set_status "$TMUX_SESSION" "done"
+        ;;
+    Notification)
+        # Claude is waiting for user input.
+        set_status "$TMUX_SESSION" "done"
+
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        "$SCRIPT_DIR/../scripts/play-sound.sh" 2>/dev/null &
+        ;;
+esac
 
 # Always exit successfully
 exit 0

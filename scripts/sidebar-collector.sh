@@ -10,6 +10,11 @@ source "$SCRIPT_DIR/lib/collect.sh"
 
 CACHE_FILE="$STATUS_DIR/.sidebar-cache"
 PID_FILE="$STATUS_DIR/.sidebar-collector.pid"
+RUN_ONCE=0
+
+if [[ "${1:-}" == "--once" ]]; then
+    RUN_ONCE=1
+fi
 
 # Singleton guard
 if [ -f "$PID_FILE" ]; then
@@ -62,6 +67,9 @@ while true; do
     collect_data
     if (( _COLLECT_CHANGED )); then
         serialize_cache
+    fi
+    if (( RUN_ONCE )); then
+        exit 0
     fi
     sleep 1
 done

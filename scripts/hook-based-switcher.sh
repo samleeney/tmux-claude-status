@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# fzf target switcher — hierarchical session/window/pane list with close support.
+# fzf target switcher — hierarchical session/window/pane list with management actions.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
@@ -276,6 +276,34 @@ perform_close() {
     fi
 }
 
+perform_popup_close() {
+    local sel_name="$1"
+    local sel_type="$2"
+
+    if selection_requires_confirmation "$sel_name" "$sel_type"; then
+        local prompt close_cmd confirm_cmd
+        prompt=$(selection_close_prompt "$sel_name" "$sel_type")
+        printf -v close_cmd '%q ' "$SCRIPT_DIR/close-target.sh" "$sel_name" "$sel_type"
+        printf -v confirm_cmd 'run-shell -b %q' "$close_cmd"
+        tmux confirm-before -b -p "$prompt" "$confirm_cmd"
+    else
+        dispatch_close_job "$sel_name" "$sel_type"
+    fi
+}
+
+emit_close_fzf_actions() {
+    local sel_name="$1"
+    local sel_type="$2"
+
+    if selection_requires_confirmation "$sel_name" "$sel_type"; then
+        printf 'execute-silent(bash %q --popup-close %q %q)+abort\n' \
+            "$0" "$sel_name" "$sel_type"
+    else
+        printf 'execute-silent(bash %q --state-dir %q --close %q %q)+reload(bash %q --state-dir %q --rows)\n' \
+            "$0" "$SWITCHER_STATE_DIR" "$sel_name" "$sel_type" "$0" "$SWITCHER_STATE_DIR"
+    fi
+}
+
 parse_args() {
     SWITCHER_COMMAND=""
     SWITCHER_ARG1=""
@@ -291,7 +319,7 @@ parse_args() {
                 SWITCHER_COMMAND="$1"
                 shift
                 ;;
-            --close|--toggle-expand)
+            --close|--popup-close|--toggle-expand|--close-fzf-actions)
                 SWITCHER_COMMAND="$1"
                 SWITCHER_ARG1="${2:-}"
                 SWITCHER_ARG2="${3:-}"
@@ -375,8 +403,16 @@ case "${SWITCHER_COMMAND:-}" in
         perform_close "$SWITCHER_ARG1" "$SWITCHER_ARG2"
         exit 0
         ;;
+    --popup-close)
+        perform_popup_close "$SWITCHER_ARG1" "$SWITCHER_ARG2"
+        exit 0
+        ;;
     --toggle-expand)
         toggle_expand "$SWITCHER_ARG1" "$SWITCHER_ARG2"
+        exit 0
+        ;;
+    --close-fzf-actions)
+        emit_close_fzf_actions "$SWITCHER_ARG1" "$SWITCHER_ARG2"
         exit 0
         ;;
     --reset)
@@ -403,12 +439,14 @@ selected=$(get_switcher_rows | fzf \
     --no-sort \
     --no-preview \
     --prompt="  " \
-    --header=$'\033[90mctrl-j/k scroll  tab expand/collapse  x close  ctrl-r reset\033[0m' \
+    --header=$'\033[90mctrl-j/k scroll  tab expand/collapse  ctrl-x close  ctrl-p park  ctrl-w wait  ctrl-r reset\033[0m' \
     --header-first \
     --bind="ctrl-j:down,ctrl-k:up" \
     --bind="tab:execute-silent(bash '$0' --state-dir '$state_dir' --toggle-expand {2} {1})+reload(bash '$0' --state-dir '$state_dir' --rows)" \
+    --bind="ctrl-p:execute-silent(bash '$SCRIPT_DIR/park-target.sh' {2} {1})+reload(bash '$0' --state-dir '$state_dir' --rows)" \
+    --bind="ctrl-w:execute-silent(bash '$SCRIPT_DIR/wait-target.sh' {2} {1})+abort" \
     --bind="ctrl-r:reload(bash '$0' --state-dir '$state_dir' --reset-rows)" \
-    --bind="x:execute-silent(bash '$0' --state-dir '$state_dir' --close {2} {1})+reload(bash '$0' --state-dir '$state_dir' --rows)" \
+    --bind="ctrl-x:transform(bash '$0' --state-dir '$state_dir' --close-fzf-actions {2} {1})" \
     --layout=reverse \
     --info=hidden \
     --no-separator \

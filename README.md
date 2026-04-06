@@ -195,13 +195,20 @@ The status bar shows live activity:
 
 Parked sessions stay visible in the sidebar and switcher, but are excluded from the status-line summary.
 
-Inside the sidebar and popup switcher:
+Inside the popup switcher:
 
 - `Enter` switches to the selected session, window, or pane
-- `Tab` expands or collapses the selected session or window in the popup switcher
-- `x` closes the selected pane immediately
-- `x` on a window closes that window and all child panes after confirmation
-- `x` on a session closes that session and all child windows and panes after confirmation
+- `Tab` expands or collapses the selected session or window
+- `Ctrl-X` closes the selected pane immediately
+- `Ctrl-X` on a window closes that window and all child panes after confirmation
+- `Ctrl-X` on a session closes that session and all child windows and panes after confirmation
+- `Ctrl-P` parks or unparks the selected session, window, or pane
+- `Ctrl-W` opens wait mode for the selected target, or cancels an existing wait
+- `Ctrl-R` resets tracked state
+
+Inside the sidebar:
+
+- `x`, `p`, and `w` perform the same close, park, and wait actions without interfering with popup search input
 
 ## Configuration
 

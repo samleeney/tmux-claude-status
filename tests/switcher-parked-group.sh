@@ -23,8 +23,8 @@ case "\${1:-}" in
     list-panes)
         case "\${2:-}" in
             -a)
-                # session, pane_id, win_idx, win_name, pane_title, pane_cmd
-                printf 'parked-task${tab}%%1${tab}0${tab}bash${tab}${tab}bash\n'
+                # session, pane_id, win_idx, win_name, pane_cmd, pane_title
+                printf 'parked-task${tab}%%1${tab}0${tab}bash${tab}bash${tab}\n'
                 ;;
             -t)
                 case "\${5:-}" in

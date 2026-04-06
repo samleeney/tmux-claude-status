@@ -9,6 +9,8 @@ PLUGIN_DIR="$(dirname "$CURRENT_DIR")"
 
 # shellcheck source=lib/session-status.sh
 source "$CURRENT_DIR/lib/session-status.sh"
+# shellcheck source=lib/selection-targets.sh
+source "$CURRENT_DIR/lib/selection-targets.sh"
 
 # ─── Mode ─────────────────────────────────────────────────────────
 PREVIEW_MODE=0
@@ -69,6 +71,10 @@ SEL_COUNT=0
 WAIT_INPUT_ACTIVE=0
 WAIT_INPUT_TARGET=""
 WAIT_INPUT_BUF=""
+CLOSE_CONFIRM_ACTIVE=0
+CLOSE_CONFIRM_NAME=""
+CLOSE_CONFIRM_TYPE=""
+CLOSE_CONFIRM_PROMPT=""
 
 # Spinner for working sessions (cycles each render).
 SPINNER_FRAMES=('⣾' '⣽' '⣻' '⢿' '⡿' '⣟' '⣯' '⣷')
@@ -219,7 +225,9 @@ render() {
     local buf=""
 
     # ── Header / Search bar ──
-    if (( SEARCH_ACTIVE )); then
+    if (( CLOSE_CONFIRM_ACTIVE )); then
+        buf+=" ${BOLD}x${RST} ${CLOSE_CONFIRM_PROMPT}${DIM} [Enter confirm, Esc cancel]${RST}\033[K\n"
+    elif (( SEARCH_ACTIVE )); then
         buf+=" ${BOLD}/${RST}${SEARCH_QUERY}${DIM}▏${RST}\033[K\n"
     else
         buf+=" "
@@ -717,31 +725,42 @@ action_switch() {
     local ttype="${SEL_TYPES[$SELECTED]}"
     [[ -z "$target" ]] && return
 
-    if [[ "$ttype" == "P" ]]; then
-        local sess="${target%%:*}"
-        local pane_id="${target#*:}"
-        if [[ "$pane_id" == w* ]]; then
-            # Window entry — switch to session and select window
-            local win_idx="${pane_id#w}"
-            tmux switch-client -t "$sess" 2>/dev/null
-            tmux select-window -t "$sess:$win_idx" 2>/dev/null
-        else
-            # Pane entry — switch to session, window, and pane
-            local win
-            win=$(tmux display-message -t "$pane_id" -p '#{window_index}' 2>/dev/null)
-            tmux switch-client -t "$sess" 2>/dev/null
-            [ -n "$win" ] && tmux select-window -t "$sess:$win" 2>/dev/null
-            tmux select-pane -t "$pane_id" 2>/dev/null
-        fi
-    else
-        tmux switch-client -t "$target" 2>/dev/null
-    fi
+    selection_switch_client "$target" "$ttype"
 
     if (( PREVIEW_MODE )); then
         # Popup mode: close on select.
         exit 0
     fi
     # Sidebar mode: keep running. The new session has its own sidebar.
+    NEEDS_COLLECT=1
+}
+
+dispatch_close_job() {
+    local sel_name="$1"
+    local sel_type="$2"
+    local close_cmd=""
+
+    printf -v close_cmd '%q ' "$CURRENT_DIR/close-target.sh" "$sel_name" "$sel_type"
+    tmux run-shell -b "$close_cmd"
+}
+
+action_close() {
+    (( SEL_COUNT == 0 )) && return
+
+    local sel_name="${SEL_NAMES[$SELECTED]}"
+    local sel_type="${SEL_TYPES[$SELECTED]}"
+    [[ -z "$sel_name" ]] && return
+
+    if selection_requires_confirmation "$sel_name" "$sel_type"; then
+        CLOSE_CONFIRM_ACTIVE=1
+        CLOSE_CONFIRM_NAME="$sel_name"
+        CLOSE_CONFIRM_TYPE="$sel_type"
+        CLOSE_CONFIRM_PROMPT="$(selection_close_prompt "$sel_name" "$sel_type")"
+        return
+    fi
+
+    dispatch_close_job "$sel_name" "$sel_type"
+    _LAST_STATUS_MTIME=""
     NEEDS_COLLECT=1
 }
 
@@ -1015,6 +1034,24 @@ while true; do
                 [0-9])
                     WAIT_INPUT_BUF+="$key" ;;
             esac
+        elif (( CLOSE_CONFIRM_ACTIVE )); then
+            case "$key" in
+                $'\x1b'|q)
+                    CLOSE_CONFIRM_ACTIVE=0
+                    CLOSE_CONFIRM_NAME=""
+                    CLOSE_CONFIRM_TYPE=""
+                    CLOSE_CONFIRM_PROMPT=""
+                    ;;
+                '')
+                    dispatch_close_job "$CLOSE_CONFIRM_NAME" "$CLOSE_CONFIRM_TYPE"
+                    CLOSE_CONFIRM_ACTIVE=0
+                    CLOSE_CONFIRM_NAME=""
+                    CLOSE_CONFIRM_TYPE=""
+                    CLOSE_CONFIRM_PROMPT=""
+                    NEEDS_COLLECT=1
+                    _LAST_STATUS_MTIME=""
+                    ;;
+            esac
         elif (( SEARCH_ACTIVE )); then
             # Search mode input handling
             case "$key" in
@@ -1061,6 +1098,7 @@ while true; do
                 '')  action_switch ;;
                 w)   action_wait; NEEDS_COLLECT=1 ;;
                 p)   action_park; NEEDS_COLLECT=1 ;;
+                x)   action_close ;;
                 r)   "$CURRENT_DIR/hook-based-switcher.sh" --reset >/dev/null 2>&1
                      KNOWN_AGENTS=()
                      NEEDS_COLLECT=1

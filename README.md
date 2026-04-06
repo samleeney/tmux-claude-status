@@ -1,6 +1,6 @@
 # tmux-agent-status
 
-Sidebar-first AI agent session manager for tmux. It gives each tmux session a persistent status sidebar, keeps a compact summary in the status line, and adds a flat `fzf` pane switcher for fast jumps across agent panes.
+Sidebar-first AI agent session manager for tmux. It gives each tmux session a persistent status sidebar, keeps a compact summary in the status line, and adds a hierarchical `fzf` target switcher for fast jumps and cleanup across agent sessions, windows, and panes.
 
 Claude Code and Codex CLI are both integrated through hooks, so their states come from agent lifecycle events rather than fragile process polling. Custom agents can still integrate through status files or collector extensions.
 
@@ -11,7 +11,7 @@ Demo video: [`demo/full.mp4`](demo/full.mp4)
 ## Features
 
 - Persistent sidebar in every tmux session
-- Flat `fzf` pane switcher for quick jumps
+- Hierarchical `fzf` target switcher for quick jumps and close actions
 - Hook-based Claude Code and Codex tracking
 - Wait and park modes for triaging work
 - Compact status-line summary with finish notifications
@@ -176,12 +176,12 @@ Integrate any AI coding tool with either of these approaches:
 Default mode is sidebar-first:
 
 - Every tmux session gets a sidebar pane automatically
-- `prefix + S` opens the flat `fzf` pane switcher
+- `prefix + S` opens the hierarchical `fzf` target switcher
 - `prefix + o` focuses or creates the sidebar in the current window
 
 | Key | Action |
 |-----|--------|
-| `prefix + S` | Open the flat `fzf` pane switcher |
+| `prefix + S` | Open the hierarchical `fzf` target switcher |
 | `prefix + o` | Focus or create the sidebar |
 | `prefix + N` | Jump to the next ready or done agent session |
 | `prefix + W` | Put the current session or pane into timed wait mode |
@@ -194,6 +194,14 @@ The status bar shows live activity:
 - `✓ All agents ready`
 
 Parked sessions stay visible in the sidebar and switcher, but are excluded from the status-line summary.
+
+Inside the sidebar and popup switcher:
+
+- `Enter` switches to the selected session, window, or pane
+- `Tab` expands or collapses the selected session or window in the popup switcher
+- `x` closes the selected pane immediately
+- `x` on a window closes that window and all child panes after confirmation
+- `x` on a session closes that session and all child windows and panes after confirmation
 
 ## Configuration
 
@@ -272,7 +280,7 @@ Works with cloud VMs, GPU boxes, and any SSH-accessible tmux host.
 - Claude Code support is hook-based
 - Codex CLI support is hook-based
 - Custom agents can be file-based or process-detected
-- The sidebar is the main live view; the `fzf` switcher is the quick jump tool
+- The sidebar is the main live view; the `fzf` switcher is the quick jump and close tool
 
 ## License
 

@@ -204,7 +204,11 @@ collect() {
     # Only re-parse when the cache file has been updated.
     local cache_file="$STATUS_DIR/.sidebar-cache"
     local cache_mtime
-    cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || echo 0)
+    if [[ "$(uname)" == "Darwin" ]]; then
+        cache_mtime=$(stat -f %m "$cache_file" 2>/dev/null || echo 0)
+    else
+        cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || echo 0)
+    fi
     if [[ "$cache_mtime" == "$_LAST_STATUS_MTIME" ]]; then
         _collect_cur_client
         return

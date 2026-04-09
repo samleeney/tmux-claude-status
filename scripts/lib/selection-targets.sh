@@ -173,6 +173,35 @@ selection_list_panes() {
     esac
 }
 
+selection_includes_current_client() {
+    local sel_name="$1"
+    local sel_type="$2"
+    local scope session token
+    local current_session current_window current_pane
+
+    scope=$(selection_scope "$sel_name" "$sel_type") || return 1
+    session=$(selection_session "$sel_name" "$sel_type")
+    token=$(selection_token "$sel_name" "$sel_type")
+    current_session=$(tmux display-message -p "#{client_session}" 2>/dev/null || true)
+    current_window=$(tmux display-message -p "#{window_index}" 2>/dev/null || true)
+    current_pane=$(tmux display-message -p "#{pane_id}" 2>/dev/null || true)
+
+    case "$scope" in
+        session)
+            [ "$session" = "$current_session" ]
+            ;;
+        window)
+            [ "$session" = "$current_session" ] && [ "${token#w}" = "$current_window" ]
+            ;;
+        pane)
+            [ "$token" = "$current_pane" ]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 selection_switch_client() {
     local sel_name="$1"
     local sel_type="$2"

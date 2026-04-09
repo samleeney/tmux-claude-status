@@ -1,78 +1,143 @@
 #!/usr/bin/env bash
 
-# Cycle through all done panes: current session first, then others.
-# Order: panes in current window → other windows → other sessions.
+# Cycle through inbox targets in the same order shown in the sidebar.
+
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/session-status.sh
 source "$SCRIPT_DIR/lib/session-status.sh"
+# shellcheck source=lib/selection-targets.sh
+source "$SCRIPT_DIR/lib/selection-targets.sh"
+# shellcheck source=lib/collect.sh
+source "$SCRIPT_DIR/lib/collect.sh"
 
-PANE_DIR="$STATUS_DIR/panes"
+EXCLUDE_NAME=""
+EXCLUDE_TYPE=""
+if [[ "${1:-}" == "--exclude" ]]; then
+    EXCLUDE_NAME="${2:-}"
+    EXCLUDE_TYPE="${3:-}"
+fi
+
 current_session=$(tmux display-message -p "#{session_name}")
 current_window=$(tmux display-message -p "#{window_index}")
 current_pane=$(tmux display-message -p "#{pane_id}")
 
-# Check if a session has per-pane status files.
-session_has_pane_status() {
-    local sess="$1"
-    for f in "$PANE_DIR/${sess}_"*.status; do
-        [ -f "$f" ] && return 0
-    done
-    return 1
+declare -A KNOWN_AGENTS=()
+declare -A LIVE_PANES=()
+declare -A PID_PPID=()
+declare -A PANE_COUNTS=()
+ENTRIES=()
+SEL_NAMES=()
+SEL_TYPES=()
+SESS_START=0
+_COLLECT_TICK=0
+_LAST_STATUS_MTIME=""
+_COLLECT_CHANGED=0
+
+inbox_target_current_rank() {
+    local sel_name="$1"
+    local sel_type="$2"
+    local scope session token
+
+    scope=$(selection_scope "$sel_name" "$sel_type") || return 1
+    session=$(selection_session "$sel_name" "$sel_type")
+    token=$(selection_token "$sel_name" "$sel_type")
+
+    case "$scope" in
+        pane)
+            if [ "$session" = "$current_session" ] && [ "$token" = "$current_pane" ]; then
+                echo 3
+            else
+                echo 0
+            fi
+            ;;
+        window)
+            if [ "$session" = "$current_session" ] && [ "${token#w}" = "$current_window" ]; then
+                echo 2
+            else
+                echo 0
+            fi
+            ;;
+        session)
+            if [ "$session" = "$current_session" ]; then
+                echo 1
+            else
+                echo 0
+            fi
+            ;;
+        *)
+            echo 0
+            ;;
+    esac
 }
 
-# Collect done panes for a session in window/pane order.
-# Falls back to session-level status when no per-pane files exist.
-add_done_panes() {
-    local sess="$1"
+inbox_target_is_excluded() {
+    local sel_name="$1"
+    local sel_type="$2"
+    local candidate_session
 
-    if session_has_pane_status "$sess"; then
-        # Per-pane: check each pane's individual status file
-        for win in $(tmux list-windows -t "$sess" -F "#{window_index}" 2>/dev/null); do
-            while IFS= read -r pid; do
-                sf="$PANE_DIR/${sess}_${pid}.status"
-                if [ -f "$sf" ]; then
-                    local st="$(<"$sf")"
-                    { [ "$st" = "done" ] || [ "$st" = "ask" ]; } && targets+=("$sess:$win:$pid")
-                fi
-            done < <(tmux list-panes -t "$sess:$win" -F "#{pane_id}" 2>/dev/null)
-        done
-    else
-        # Session-level fallback: use session status file
-        local sf="$STATUS_DIR/${sess}.status"
-        [ -f "$sf" ] || return
-        local st="$(<"$sf")"
-        { [ "$st" = "done" ] || [ "$st" = "ask" ]; } || return
-        # Skip parked sessions
-        [ -f "$PARKED_DIR/${sess}.parked" ] && return
-        # Target the first window/pane of this session
-        local first
-        first=$(tmux list-panes -t "$sess" -F "#{window_index}:#{pane_id}" 2>/dev/null | head -1)
-        [ -n "$first" ] && targets+=("$sess:${first%%:*}:${first#*:}")
+    [ -n "$EXCLUDE_NAME" ] || return 1
+
+    candidate_session=$(selection_session "$sel_name" "$sel_type")
+    [ "$candidate_session" = "$(selection_session "$EXCLUDE_NAME" "$EXCLUDE_TYPE")" ]
+}
+
+collect_data
+
+target_names=()
+target_types=()
+sel_index=0
+for entry in "${ENTRIES[@]}"; do
+    if [[ "${entry%%|*}" == "G" ]]; then
+        continue
     fi
-}
-
-targets=()
-add_done_panes "$current_session"
-for sess in $(tmux list-sessions -F "#{session_name}" 2>/dev/null | sort); do
-    [ "$sess" = "$current_session" ] && continue
-    add_done_panes "$sess"
+    if (( sel_index >= SESS_START )); then
+        break
+    fi
+    target_names+=("${SEL_NAMES[$sel_index]}")
+    target_types+=("${SEL_TYPES[$sel_index]}")
+    sel_index=$((sel_index + 1))
 done
 
-if [ ${#targets[@]} -eq 0 ]; then
-    tmux display-message "No done panes"
+if (( ${#target_names[@]} == 0 )); then
+    tmux display-message "No inbox items"
     exit 1
 fi
 
-# Find current position, pick next
 current_index=-1
-for i in "${!targets[@]}"; do
-    IFS=: read -r s w p <<< "${targets[$i]}"
-    [ "$s" = "$current_session" ] && [ "$w" = "$current_window" ] && [ "$p" = "$current_pane" ] && {
+current_rank=0
+for i in "${!target_names[@]}"; do
+    rank=$(inbox_target_current_rank "${target_names[$i]}" "${target_types[$i]}")
+    if (( rank > current_rank )); then
+        current_rank=$rank
         current_index=$i
-        break
-    }
+    fi
 done
-next_index=$(( (current_index + 1) % ${#targets[@]} ))
 
-IFS=: read -r sess win pane <<< "${targets[$next_index]}"
-tmux switch-client -t "$sess" \; select-window -t "$sess:$win" \; select-pane -t "$pane"
+next_index=-1
+if (( current_index >= 0 )); then
+    for ((step=1; step<=${#target_names[@]}; step++)); do
+        idx=$(( (current_index + step) % ${#target_names[@]} ))
+        if inbox_target_is_excluded "${target_names[$idx]}" "${target_types[$idx]}"; then
+            continue
+        fi
+        next_index=$idx
+        break
+    done
+else
+    for i in "${!target_names[@]}"; do
+        if inbox_target_is_excluded "${target_names[$i]}" "${target_types[$i]}"; then
+            continue
+        fi
+        next_index=$i
+        break
+    done
+fi
+
+if (( next_index < 0 )); then
+    tmux display-message "No inbox items"
+    exit 1
+fi
+
+selection_switch_client "${target_names[$next_index]}" "${target_types[$next_index]}"

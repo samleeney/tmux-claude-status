@@ -9,6 +9,10 @@ PARKED_DIR="$STATUS_DIR/parked"
 PANE_DIR="$STATUS_DIR/panes"
 mkdir -p "$WAIT_DIR" "$PANE_DIR"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/session-status.sh
+source "$SCRIPT_DIR/lib/session-status.sh"
+
 target="$1"
 wait_minutes="$2"
 
@@ -34,7 +38,7 @@ if [[ "$target" == *:w* ]]; then
     done < <(tmux list-panes -t "${session}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
     sync
 
-    echo "wait" > "$STATUS_DIR/${session}.status"
+    sync_session_after_child_scope_change "$session"
     tmux display-message "Window $win_idx will wait for $wait_minutes minutes"
 elif [[ "$target" == *:* ]]; then
     # Pane-level wait: "session:pane_id"
@@ -46,8 +50,7 @@ elif [[ "$target" == *:* ]]; then
     rm -f "$PARKED_DIR/${session}_${pane_id}.parked"
     echo "wait" > "$PANE_DIR/${session}_${pane_id}.status"
 
-    # Update session-level status to reflect the wait
-    echo "wait" > "$STATUS_DIR/${session}.status"
+    sync_session_after_child_scope_change "$session"
 
     tmux display-message "Pane $pane_id will wait for $wait_minutes minutes"
 else
@@ -79,7 +82,6 @@ else
 fi
 
 # Switch to next done session
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NEXT_DONE_SCRIPT="$SCRIPT_DIR/next-done-project.sh"
 if [ -f "$NEXT_DONE_SCRIPT" ]; then
     bash "$NEXT_DONE_SCRIPT" "$session" 2>/dev/null || true

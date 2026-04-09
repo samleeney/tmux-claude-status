@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 PARKED_DIR="$STATUS_DIR/parked"
 DAEMON_PID_FILE="$STATUS_DIR/smart-monitor.pid"
+# shellcheck source=scripts/lib/session-status.sh
+source "$SCRIPT_DIR/scripts/lib/session-status.sh"
 
 # Function to check if any SSH sessions exist
 has_ssh_sessions() {
@@ -36,33 +38,6 @@ has_wait_timers() {
     done
 
     return 1
-}
-
-# Function to check wait timers and move expired sessions back to done
-check_wait_timers() {
-    local wait_dir="$STATUS_DIR/wait"
-    [ ! -d "$wait_dir" ] && return
-
-    local current_time=$(date +%s)
-
-    for wait_file in "$wait_dir"/*.wait; do
-        [ ! -f "$wait_file" ] && continue
-
-        local session_name=$(basename "$wait_file" .wait)
-        local expiry_time=$(cat "$wait_file" 2>/dev/null)
-
-        if [ -n "$expiry_time" ] && [ "$current_time" -ge "$expiry_time" ]; then
-            # Timer expired, move back to done
-            echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
-            echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
-
-            # Remove wait file
-            rm -f "$wait_file"
-
-            # Play notification sound (same as when an agent finishes)
-            "$SCRIPT_DIR/scripts/play-sound.sh" &
-        fi
-    done
 }
 
 # Function to check if daemon should keep running
@@ -148,7 +123,9 @@ update_ssh_status() {
     # ADD_SSH_SESSIONS_HERE
 
     # Check wait timers and move expired sessions back to done
-    check_wait_timers
+    if [ "$(expire_wait_timers)" -gt 0 ]; then
+        "$SCRIPT_DIR/scripts/play-sound.sh" &
+    fi
 }
 
 # Function to start monitoring

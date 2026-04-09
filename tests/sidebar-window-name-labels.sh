@@ -78,6 +78,20 @@ assert_contains() {
     fi
 }
 
+assert_matches() {
+    local pattern="$1"
+    local file="$2"
+    local message="$3"
+
+    if ! grep -Eq "$pattern" "$file"; then
+        echo "Assertion failed: $message" >&2
+        echo "Missing regex: $pattern" >&2
+        echo "In file: $file" >&2
+        sed -n '1,120p' "$file" >&2
+        exit 1
+    fi
+}
+
 echo "done" > "$PANE_DIR/repo_%1.status"
 echo "done" > "$PANE_DIR/repo_%2.status"
 echo "claude" > "$PANE_DIR/repo_%1.agent"
@@ -88,7 +102,7 @@ HOME="$TEST_HOME" \
 "$REPO_DIR/scripts/sidebar-collector.sh" --once >/dev/null
 
 CACHE_FILE="$STATUS_DIR/.sidebar-cache"
-assert_contains $'R:P|repo|%1|pr24-display-mode|done|' "$CACHE_FILE" "single-pane windows in multi-window sessions should use the window name in the session list"
-assert_contains $'R:P|repo|%2|pr25-ask-status|done|' "$CACHE_FILE" "window names should be stable labels for single-pane window rows"
+assert_matches $'^R:P\\|repo\\|%1\\|pr24-display-mode\\|done\\|[01]\trepo:w1\tP$' "$CACHE_FILE" "single-pane windows in multi-window sessions should keep a window-scoped target"
+assert_matches $'^R:P\\|repo\\|%2\\|pr25-ask-status\\|done\\|[01]\trepo:w2\tP$' "$CACHE_FILE" "window names should remain stable labels while actions target the window scope"
 
 echo "sidebar window name label regression checks passed"

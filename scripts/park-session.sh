@@ -16,6 +16,11 @@ if ! has_agent_in_session "$current_session" && ! is_ssh_session "$current_sessi
     fi
 fi
 
+NEXT_DONE_SCRIPT="$SCRIPT_DIR/next-done-project.sh"
+if [ -f "$NEXT_DONE_SCRIPT" ]; then
+    bash "$NEXT_DONE_SCRIPT" --exclude "$current_session" "S" >/dev/null 2>&1 || true
+fi
+
 rm -f "$WAIT_DIR/$current_session.wait"
 : > "$PARKED_DIR/$current_session.parked"
 
@@ -35,11 +40,4 @@ while IFS= read -r pane_id; do
     rm -f "$WAIT_DIR/${current_session}_${pane_id}.wait" 2>/dev/null
 done < <(tmux list-panes -t "$current_session" -F '#{pane_id}' 2>/dev/null)
 
-NEXT_DONE_SCRIPT="$SCRIPT_DIR/next-done-project.sh"
-if [ -f "$NEXT_DONE_SCRIPT" ]; then
-    if ! bash "$NEXT_DONE_SCRIPT" "$current_session" 2>/dev/null; then
-        tmux display-message "Session $current_session parked for later"
-    fi
-else
-    tmux display-message "Session $current_session parked for later"
-fi
+tmux display-message "Session $current_session parked for later"

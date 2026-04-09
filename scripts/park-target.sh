@@ -48,6 +48,20 @@ selection_current_state() {
     esac
 }
 
+switch_client_to_next_inbox_if_needed() {
+    local sel_name="$1"
+    local sel_type="$2"
+    local state="$3"
+    local scope
+
+    scope=$(selection_scope "$sel_name" "$sel_type") || return 0
+    [ "$scope" = "session" ] || return 0
+    [ "$state" != "parked" ] || return 0
+    selection_includes_current_client "$sel_name" "$sel_type" || return 0
+
+    bash "$SCRIPT_DIR/next-done-project.sh" --exclude "$sel_name" "$sel_type" >/dev/null 2>&1 || true
+}
+
 toggle_park() {
     local sel_name="$1"
     local sel_type="$2"
@@ -59,6 +73,7 @@ toggle_park() {
     state=$(selection_current_state "$sel_name" "$sel_type" || true)
 
     mkdir -p "$PARKED_DIR" "$PANE_DIR"
+    switch_client_to_next_inbox_if_needed "$sel_name" "$sel_type" "$state"
 
     case "$scope" in
         session)
@@ -98,8 +113,6 @@ toggle_park() {
                     [ -f "$pane_status_file" ] && [ "$(cat "$pane_status_file" 2>/dev/null || echo "")" = "parked" ] && echo "done" > "$pane_status_file"
                 done < <(tmux list-panes -t "${session}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
 
-                rm -f "$PARKED_DIR/${session}.parked"
-                [ "$(get_agent_status "$session")" = "parked" ] && write_session_state "$session" "done"
             else
                 while IFS= read -r pane_id; do
                     [ -n "$pane_id" ] || continue
@@ -108,6 +121,7 @@ toggle_park() {
                     rm -f "$WAIT_DIR/${session}_${pane_id}.wait" 2>/dev/null
                 done < <(tmux list-panes -t "${session}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
             fi
+            sync_session_after_child_scope_change "$session"
             ;;
         pane)
             if [ "$state" = "parked" ]; then
@@ -115,14 +129,12 @@ toggle_park() {
                 if [ -f "$PANE_DIR/${session}_${token}.status" ]; then
                     echo "done" > "$PANE_DIR/${session}_${token}.status"
                 fi
-
-                rm -f "$PARKED_DIR/${session}.parked"
-                [ "$(get_agent_status "$session")" = "parked" ] && write_session_state "$session" "done"
             else
                 rm -f "$WAIT_DIR/${session}_${token}.wait" 2>/dev/null
                 : > "$PARKED_DIR/${session}_${token}.parked"
                 echo "parked" > "$PANE_DIR/${session}_${token}.status"
             fi
+            sync_session_after_child_scope_change "$session"
             ;;
     esac
 

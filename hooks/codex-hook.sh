@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-# Claude Code hook for tmux-agent-status
-# Updates tmux session and pane status files based on Claude's working state
+# Codex hook for tmux-agent-status.
+# Hook events are passed as the first argument from hooks.json; the JSON payload
+# is read from stdin and ignored here because tmux-agent-status only needs the
+# event name to update session state.
 
 STATUS_DIR="$HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
@@ -11,7 +13,7 @@ REFRESH_FILE="$STATUS_DIR/.sidebar-refresh"
 mkdir -p "$STATUS_DIR" "$WAIT_DIR" "$PARKED_DIR" "$PANE_DIR"
 [ -f "$REFRESH_FILE" ] || : > "$REFRESH_FILE"
 
-# Drain JSON from stdin (required by Claude Code hooks).
+# Drain the JSON payload from stdin so Codex can close the hook cleanly.
 cat >/dev/null 2>&1 || true
 
 in_remote_session() {
@@ -56,7 +58,7 @@ set_status() {
         local pane_file="$PANE_DIR/${tmux_session}_${TMUX_PANE}.status"
         local agent_file="$PANE_DIR/${tmux_session}_${TMUX_PANE}.agent"
         echo "$requested_status" > "$pane_file"
-        echo "claude" > "$agent_file"
+        echo "codex" > "$agent_file"
 
         session_status="done"
         local existing_pane_file=""
@@ -113,17 +115,18 @@ WAIT_FILE="$WAIT_DIR/${TMUX_SESSION}.wait"
 PARKED_FILE="$PARKED_DIR/${TMUX_SESSION}.parked"
 
 case "$HOOK_TYPE" in
+    SessionStart)
+        if [ ! -f "$WAIT_FILE" ] && [ ! -f "$PARKED_FILE" ]; then
+            set_status "$TMUX_SESSION" "done"
+            mark_refresh
+        fi
+        ;;
     UserPromptSubmit)
-        # User submitted a prompt — this is an explicit interaction, so
-        # cancel wait mode and unpark.
         clear_interaction_overrides "$TMUX_SESSION"
         set_status "$TMUX_SESSION" "working"
         mark_refresh
         ;;
-    PreToolUse)
-        # Agent is calling a tool — mark working but do NOT unpark.
-        # Parking is an explicit user decision; only user interaction
-        # (UserPromptSubmit) should unpark.
+    PreToolUse|PostToolUse)
         rm -f "$WAIT_FILE"
         if [ ! -f "$PARKED_FILE" ]; then
             set_status "$TMUX_SESSION" "working"
@@ -131,20 +134,9 @@ case "$HOOK_TYPE" in
         mark_refresh
         ;;
     Stop)
-        # Claude has finished responding (SubagentStop excluded - subagents
-        # finishing doesn't mean the main agent is done).
         set_status "$TMUX_SESSION" "done"
         mark_refresh
-        ;;
-    Notification)
-        # Claude is waiting for user input.
-        set_status "$TMUX_SESSION" "done"
-        mark_refresh
-
-        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-        "$SCRIPT_DIR/../scripts/play-sound.sh" 2>/dev/null &
         ;;
 esac
 
-# Always exit successfully
 exit 0

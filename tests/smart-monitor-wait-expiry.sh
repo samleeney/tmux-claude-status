@@ -10,9 +10,10 @@ TEST_HOME="$TMP_DIR/home"
 FAKE_BIN="$TMP_DIR/bin"
 STATUS_DIR="$TEST_HOME/.cache/tmux-agent-status"
 WAIT_DIR="$STATUS_DIR/wait"
+PANE_DIR="$STATUS_DIR/panes"
 PID_FILE="$STATUS_DIR/smart-monitor.pid"
 
-mkdir -p "$FAKE_BIN" "$WAIT_DIR"
+mkdir -p "$FAKE_BIN" "$WAIT_DIR" "$PANE_DIR"
 
 cat > "$FAKE_BIN/tmux" <<'EOF'
 #!/usr/bin/env bash
@@ -50,7 +51,9 @@ assert_eq() {
 
 expiry_time=$(( $(date +%s) - 1 ))
 echo "$expiry_time" > "$WAIT_DIR/local-session.wait"
+echo "$expiry_time" > "$WAIT_DIR/local-session_%1.wait"
 echo "wait" > "$STATUS_DIR/local-session.status"
+echo "wait" > "$PANE_DIR/local-session_%1.status"
 
 PATH="$FAKE_BIN:$PATH" HOME="$TEST_HOME" "$REPO_DIR/smart-monitor.sh" start
 
@@ -68,6 +71,14 @@ fi
 
 status_value="$(cat "$STATUS_DIR/local-session.status")"
 assert_eq "done" "$status_value" "expired wait timers should move sessions back to done"
+
+pane_status_value="$(cat "$PANE_DIR/local-session_%1.status")"
+assert_eq "done" "$pane_status_value" "expired pane wait timers should move panes back to done"
+
+if [ -f "$WAIT_DIR/local-session_%1.wait" ]; then
+    echo "Assertion failed: smart monitor should expire pane wait timers too" >&2
+    exit 1
+fi
 
 for _ in 1 2 3; do
     if [ ! -f "$PID_FILE" ]; then

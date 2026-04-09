@@ -231,7 +231,7 @@ set -g @agent-park-key "p"
 
 set -g @agent-switcher-style "both"        # popup | sidebar | both
 set -g @agent-status-display-method "popup" # popup | window
-set -g @agent-sidebar-width "40"
+set -g @agent-sidebar-width "42"
 ```
 
 `@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.

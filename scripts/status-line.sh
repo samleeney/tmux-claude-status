@@ -3,56 +3,27 @@
 # Status line script for tmux status bar
 # Shows agent status across all sessions
 
-STATUS_DIR="$HOME/.cache/tmux-agent-status"
-PARKED_DIR="$STATUS_DIR/parked"
-PANE_DIR="$STATUS_DIR/panes"
-LAST_STATUS_FILE="$STATUS_DIR/.last-status-summary"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/agent-processes.sh
-source "$SCRIPT_DIR/lib/agent-processes.sh"
+# shellcheck source=lib/session-status.sh
+source "$SCRIPT_DIR/lib/session-status.sh"
+# shellcheck source=lib/status-summary.sh
+source "$SCRIPT_DIR/lib/status-summary.sh"
 
-is_ssh_session() {
-    local session="$1"
-    if tmux list-panes -t "$session" -F "#{pane_current_command}" 2>/dev/null | grep -q "^ssh$"; then
-        return 0
+LAST_STATUS_FILE="$STATUS_LINE_COUNTS_FILE"
+COLLECTOR_PID_FILE="$STATUS_DIR/.sidebar-collector.pid"
+
+collector_running=0
+if [ -f "$COLLECTOR_PID_FILE" ]; then
+    collector_pid=$(cat "$COLLECTOR_PID_FILE" 2>/dev/null || echo "")
+    if [ -n "$collector_pid" ] && kill -0 "$collector_pid" 2>/dev/null; then
+        collector_running=1
     fi
-    case "$session" in
-        reachgpu) return 0 ;;
-        *) return 1 ;;
-    esac
-}
+fi
 
-# Check and expire wait timers
-check_wait_timers() {
-    local wait_dir="$STATUS_DIR/wait"
-    [ ! -d "$wait_dir" ] && return
-    local current_time=$(date +%s)
-    for wait_file in "$wait_dir"/*.wait; do
-        [ ! -f "$wait_file" ] && continue
-        local session_name=$(basename "$wait_file" .wait)
-        local expiry_time=$(cat "$wait_file" 2>/dev/null)
-        if [ -n "$expiry_time" ] && [ "$current_time" -ge "$expiry_time" ]; then
-            echo "done" > "$STATUS_DIR/${session_name}.status" 2>/dev/null
-            # Only update remote status if it already exists (SSH sessions)
-            [ -f "$STATUS_DIR/${session_name}-remote.status" ] && echo "done" > "$STATUS_DIR/${session_name}-remote.status" 2>/dev/null
-            rm -f "$wait_file"
-        fi
-    done
-}
-
-normalize_local_wait_status() {
-    local session="$1"
-    local status_file="$STATUS_DIR/${session}.status"
-    local wait_file="$STATUS_DIR/wait/${session}.wait"
-
-    [ ! -f "$status_file" ] && return
-
-    local status
-    status=$(cat "$status_file" 2>/dev/null || echo "")
-    if [ "$status" = "wait" ] && [ ! -f "$wait_file" ]; then
-        echo "done" > "$status_file" 2>/dev/null
-    fi
-}
+if (( collector_running )) && [ -f "$STATUS_LINE_CACHE_FILE" ]; then
+    cat "$STATUS_LINE_CACHE_FILE"
+    exit 0
+fi
 
 session_has_pane_status() {
     local session="$1"
@@ -110,7 +81,7 @@ check_agent_processes() {
 
         # Parking is an explicit user decision — never auto-unpark.
         # Unparking only happens via user interaction (hook in better-hook.sh).
-        if [ -f "$parked_file" ]; then
+        if session_is_fully_parked "$session"; then
             continue
         fi
 
@@ -140,7 +111,7 @@ check_agent_processes() {
     done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
 }
 
-check_wait_timers
+expire_wait_timers >/dev/null
 check_agent_processes
 
 # Count agent sessions by status
@@ -154,8 +125,7 @@ count_agent_status() {
     while IFS= read -r session; do
         [ -z "$session" ] && continue
 
-        local parked_file="$PARKED_DIR/${session}.parked"
-        if [ -f "$parked_file" ]; then
+        if session_is_fully_parked "$session"; then
             continue
         fi
 
@@ -206,11 +176,6 @@ count_agent_status() {
     echo "$working:$waiting:$done:$total_agents"
 }
 
-# Play notification sound
-play_notification() {
-    "$SCRIPT_DIR/play-sound.sh" &
-}
-
 # Get current status
 IFS=':' read -r working waiting done total_agents <<< "$(count_agent_status)"
 
@@ -220,52 +185,16 @@ prev_done=""
 if [ -f "$LAST_STATUS_FILE" ]; then
     prev_status=$(cat "$LAST_STATUS_FILE" 2>/dev/null || echo "")
     if [[ "$prev_status" == *:* ]]; then
-        IFS=':' read -r _ _ prev_done <<< "$prev_status"
+        IFS=':' read -r _ _ prev_done _ <<< "$prev_status"
     fi
 fi
 
 # Save current status counts
-echo "$working:$waiting:$done" > "$LAST_STATUS_FILE"
+echo "$working:$waiting:$done:$total_agents" > "$LAST_STATUS_FILE"
 
 # Check if any agent just finished (done count increased)
 if [ -n "$prev_done" ] && [ "$done" -gt "$prev_done" ]; then
-    play_notification
+    "$SCRIPT_DIR/play-sound.sh" &
 fi
 
-format_working_segment() {
-    local count="$1"
-    if [ "$count" -eq 1 ]; then
-        echo "#[fg=yellow,bold]⚡ agent working#[default]"
-    else
-        echo "#[fg=yellow,bold]⚡ $count working#[default]"
-    fi
-}
-
-format_waiting_segment() {
-    local count="$1"
-    if [ "$count" -eq 1 ]; then
-        echo "#[fg=cyan,bold]⏸ 1 waiting#[default]"
-    else
-        echo "#[fg=cyan,bold]⏸ $count waiting#[default]"
-    fi
-}
-
-format_done_segment() {
-    local count="$1"
-    echo "#[fg=green]✓ $count done#[default]"
-}
-
-# Generate status line output
-if [ "$total_agents" -eq 0 ]; then
-    # No agent sessions
-    echo ""
-elif [ "$working" -eq 0 ] && [ "$waiting" -eq 0 ] && [ "$done" -gt 0 ]; then
-    # All agents are done
-    echo "#[fg=green,bold]✓ All agents ready#[default]"
-else
-    segments=()
-    [ "$working" -gt 0 ] && segments+=("$(format_working_segment "$working")")
-    [ "$waiting" -gt 0 ] && segments+=("$(format_waiting_segment "$waiting")")
-    [ "$done" -gt 0 ] && segments+=("$(format_done_segment "$done")")
-    printf '%s\n' "${segments[*]}"
-fi
+render_status_summary "$working" "$waiting" "$done" "$total_agents"

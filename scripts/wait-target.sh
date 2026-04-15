@@ -80,12 +80,7 @@ cancel_wait() {
                 [ -f "$pane_status_file" ] && [ "$(cat "$pane_status_file" 2>/dev/null || echo "")" = "wait" ] && echo "done" > "$pane_status_file"
             done < <(tmux list-panes -t "${session}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
 
-            local remaining_wait=""
-            remaining_wait=$(find "$WAIT_DIR" -maxdepth 1 -type f -name "${session}_*.wait" -print -quit 2>/dev/null || true)
-            if [ -z "$remaining_wait" ]; then
-                rm -f "$WAIT_DIR/${session}.wait"
-                write_session_state "$session" "done"
-            fi
+            sync_session_after_child_scope_change "$session"
             ;;
         pane)
             rm -f "$WAIT_DIR/${session}_${token}.wait"
@@ -93,12 +88,7 @@ cancel_wait() {
                 echo "done" > "$PANE_DIR/${session}_${token}.status"
             fi
 
-            local remaining_wait=""
-            remaining_wait=$(find "$WAIT_DIR" -maxdepth 1 -type f -name "${session}_*.wait" -print -quit 2>/dev/null || true)
-            if [ -z "$remaining_wait" ]; then
-                rm -f "$WAIT_DIR/${session}.wait"
-                write_session_state "$session" "done"
-            fi
+            sync_session_after_child_scope_change "$session"
             ;;
     esac
 

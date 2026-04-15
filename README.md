@@ -183,7 +183,7 @@ Default mode is sidebar-first:
 |-----|--------|
 | `prefix + S` | Open the hierarchical `fzf` target switcher |
 | `prefix + o` | Focus or create the sidebar |
-| `prefix + N` | Jump to the next ready or done agent session |
+| `prefix + N` | Jump to the next inbox item in inbox order |
 | `prefix + W` | Put the current session or pane into timed wait mode |
 | `prefix + p` | Park the current session or pane for later |
 
@@ -210,6 +210,16 @@ Inside the sidebar:
 
 - `x`, `p`, and `w` perform the same close, park, and wait actions without interfering with popup search input
 
+`prefix + N` follows the same top-to-bottom order as the `INBOX` section. The inbox is ordered by session name, then by tmux window order within each session.
+
+Parking, waiting, and closing always apply to the selected scope only:
+
+- selecting a session row affects the whole session
+- selecting a window row affects only that window
+- selecting a pane row affects only that pane
+
+In multi-window sessions, sidebar and inbox rows labeled with a window name operate on that window, not just the first pane inside it.
+
 ## Configuration
 
 ```tmux
@@ -221,7 +231,7 @@ set -g @agent-park-key "p"
 
 set -g @agent-switcher-style "both"        # popup | sidebar | both
 set -g @agent-status-display-method "popup" # popup | window
-set -g @agent-sidebar-width "40"
+set -g @agent-sidebar-width "42"
 ```
 
 `@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.

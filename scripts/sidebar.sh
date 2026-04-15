@@ -9,6 +9,8 @@ PLUGIN_DIR="$(dirname "$CURRENT_DIR")"
 
 # shellcheck source=lib/session-status.sh
 source "$CURRENT_DIR/lib/session-status.sh"
+# shellcheck source=lib/sidebar-clients.sh
+source "$CURRENT_DIR/lib/sidebar-clients.sh"
 # shellcheck source=lib/selection-targets.sh
 source "$CURRENT_DIR/lib/selection-targets.sh"
 
@@ -18,11 +20,27 @@ PREVIEW_MODE=0
 
 # ─── Terminal setup ───────────────────────────────────────────────
 cleanup() {
+    [ -n "${SELF_PANE:-}" ] && unregister_sidebar_client "$SELF_PANE"
     printf '\033[?1000l\033[?1006l' 2>/dev/null  # disable mouse
     tput cnorm 2>/dev/null
     stty echo 2>/dev/null
 }
+
+handle_refresh_signal() {
+    NEEDS_COLLECT=1
+    NEEDS_RENDER=1
+    _PREVIEW_DIRTY=1
+}
+
+handle_animation_signal() {
+    (( _HAS_WORKING )) && ANIMATE_TICK=1
+}
+
 trap cleanup EXIT INT TERM HUP
+trap handle_refresh_signal USR1
+trap handle_animation_signal USR2
+RESIZED=0
+trap 'RESIZED=1' WINCH
 
 tput civis  # hide cursor
 stty -echo 2>/dev/null
@@ -30,6 +48,23 @@ stty -echo 2>/dev/null
 # In popup/preview mode, skip mouse to avoid event storms.
 if (( ! PREVIEW_MODE )); then
     printf '\033[?1000h\033[?1006h'
+    SELF_PANE="${TMUX_PANE:-}"
+    if [ -z "$SELF_PANE" ]; then
+        SELF_TTY="$(tty 2>/dev/null | sed 's#/dev/##')"
+        if [ -n "$SELF_TTY" ]; then
+            while IFS=$'\t' read -r pane_id pane_tty; do
+                if [ "$pane_tty" = "$SELF_TTY" ]; then
+                    SELF_PANE="$pane_id"
+                    break
+                fi
+            done < <(tmux list-panes -a -F '#{pane_id}'$'\t''#{pane_tty}' 2>/dev/null)
+        fi
+    fi
+    [ -n "$SELF_PANE" ] || SELF_PANE="$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)"
+    if [ -n "$SELF_PANE" ]; then
+        tmux select-pane -t "$SELF_PANE" -T "$SIDEBAR_TITLE" >/dev/null 2>&1 || true
+        register_sidebar_client "$SELF_PANE" >/dev/null 2>&1 || true
+    fi
 fi
 
 # ─── State ────────────────────────────────────────────────────────
@@ -46,10 +81,15 @@ CUR_PANE=""
 
 # Screen row (1-based) → selectable index. Populated by render().
 declare -a SCREEN_SEL=()
+declare -a SPINNER_ROWS=()
+declare -a SPINNER_COLS=()
+declare -a SPINNER_BGS=()
+declare -a SPINNER_STYLES=()
 
 # Change detection: skip collect when status dir hasn't changed.
 _LAST_STATUS_MTIME=""
 _COLLECT_TICK=0
+_HAS_WORKING=0
 
 # Flat list rebuilt each frame.  Each element is one of:
 #   "G|<label>|<color>"                          — group header (not selectable)
@@ -84,6 +124,40 @@ SPINNER_TICK=0
 _PREVIEW_SEL=""
 _PREVIEW_LINES=()
 _PREVIEW_DIRTY=1
+
+_queue_spinner_target() {
+    SPINNER_ROWS+=("$1")
+    SPINNER_COLS+=("$2")
+    SPINNER_BGS+=("${3:-none}")
+    SPINNER_STYLES+=("${4:-row}")
+}
+
+animate_spinners() {
+    (( _HAS_WORKING )) || return
+
+    local frame="${SPINNER_FRAMES[$SPINNER_TICK]}"
+    local buf=""
+    local i row col bg style fg_seq
+
+    for ((i=0; i<${#SPINNER_ROWS[@]}; i++)); do
+        row="${SPINNER_ROWS[$i]}"
+        col="${SPINNER_COLS[$i]}"
+        bg="${SPINNER_BGS[$i]}"
+        style="${SPINNER_STYLES[$i]}"
+
+        fg_seq="$YEL"
+        [[ "$style" == "header" ]] && fg_seq="$BYEL"
+
+        case "$bg" in
+            sel) buf+="\033[${row};${col}H${SEL_BG}${fg_seq}${frame}${RST}" ;;
+            cur) buf+="\033[${row};${col}H${CUR_BG}${fg_seq}${frame}${RST}" ;;
+            *)   buf+="\033[${row};${col}H${fg_seq}${frame}${RST}" ;;
+        esac
+    done
+
+    [[ -n "$buf" ]] && printf '%b' "$buf"
+    SPINNER_TICK=$(( (SPINNER_TICK + 1) % ${#SPINNER_FRAMES[@]} ))
+}
 
 # ─── ANSI helpers ─────────────────────────────────────────────────
 RST=$'\033[0m'
@@ -121,9 +195,8 @@ _fuzzy_match() {
 # ─── Data collection (reads cache from sidebar-collector.sh) ─────
 _collect_cur_client() {
     local info
-    info=$(tmux display-message -p $'#{client_session}\t#{pane_id}' 2>/dev/null || true)
-    CUR_SESSION="${info%%	*}"
-    CUR_PANE="${info#*	}"
+    info=$(tmux display-message -p $'#{client_session}\t#{pane_id}\t#{window_index}' 2>/dev/null || true)
+    IFS=$'\t' read -r CUR_SESSION CUR_PANE CUR_WINDOW_INDEX <<< "$info"
 }
 
 collect() {
@@ -221,12 +294,18 @@ render() {
             esac
         fi
     done
+    _HAS_WORKING=$(( nw > 0 ? 1 : 0 ))
 
     local cur_session="$CUR_SESSION"
     local cur_pane="$CUR_PANE"
+    local cur_window_index="$CUR_WINDOW_INDEX"
 
     local line=0
     local buf=""
+    SPINNER_ROWS=()
+    SPINNER_COLS=()
+    SPINNER_BGS=()
+    SPINNER_STYLES=()
 
     # ── Header / Search bar ──
     if (( CLOSE_CONFIRM_ACTIVE )); then
@@ -240,6 +319,7 @@ render() {
         (( nwt > 0 )) && buf+="${BCYN}⏸${nwt}${RST} "
         (( nw + nd + nwt == 0 )) && buf+="${DIM}no agents${RST}"
         buf+="\033[K\n"
+        (( nw > 0 )) && _queue_spinner_target 1 2 "none" "header"
     fi
     ((line++))
 
@@ -344,13 +424,25 @@ render() {
     # so the parent S/W entry can suppress ACTIVE in favour of the child.
     local -A _active_pane_in_child=()
     if [[ -n "$cur_pane" ]]; then
-        for entry in "${render_lines[@]}"; do
+        for ((i=0; i<${#render_lines[@]}; i++)); do
+            local entry="${render_lines[$i]}"
+            local sidx="${render_sel_indices[$i]}"
             case "${entry%%|*}" in
                 P|Q)
                     local _r="${entry#?|}"
                     local _s="${_r%%|*}"; _r="${_r#*|}"
                     local _p="${_r%%|*}"
-                    [[ "$_p" == "$cur_pane" ]] && _active_pane_in_child[$_s]=1
+                    local _sel_name="${SEL_NAMES[$sidx]:-}"
+                    local _sel_type="${SEL_TYPES[$sidx]:-}"
+                    local _sel_token=""
+                    if (( sidx >= 0 )) && [[ "$_sel_type" == "P" ]]; then
+                        _sel_token="${_sel_name#*:}"
+                    fi
+                    if [[ "$_sel_token" == w* ]]; then
+                        [[ "$_s" == "$cur_session" && "${_sel_token#w}" == "$cur_window_index" ]] && _active_pane_in_child[$_s]=1
+                    else
+                        [[ "$_p" == "$cur_pane" ]] && _active_pane_in_child[$_s]=1
+                    fi
                     ;;
             esac
         done
@@ -415,16 +507,23 @@ render() {
             local extra="${rest%%|*}"; rest="${rest#*|}"
             local ssh="$rest"
             [[ "$name" == "$cur_session" && -z "${_active_pane_in_child[$name]:-}" ]] && is_cur=1
+            local _spinner_bg="none"
+            (( is_sel )) && _spinner_bg="sel"
+            (( ! is_sel && is_cur )) && _spinner_bg="cur"
 
             # Build status indicator: compact counts or single icon
             local icon_str icon_vlen
             local counts="${PANE_COUNTS[$name]:-}"
+            local has_working_spinner=0
             if [[ -n "$counts" ]]; then
                 _render_counts "$counts"
                 icon_str="$_count_str"; icon_vlen=$_count_vlen
+                IFS=: read -r _cw _cd _cwt <<< "$counts"
+                (( _cw > 0 )) && has_working_spinner=1
             else
                 local _icon _ic; _set_icon_color "$state"
                 icon_str="${_ic}${_icon}${RST}"; icon_vlen=1
+                [[ "$state" == "working" ]] && has_working_spinner=1
             fi
 
             local max_n=$((LW - 5 - icon_vlen))
@@ -446,16 +545,19 @@ render() {
             if (( is_sel )); then
                 pad=$((LW - vlen - 4 - icon_vlen))
                 (( pad < 0 )) && pad=0
+                (( has_working_spinner )) && _queue_spinner_target "$((line + 1))" "$((3 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="${SEL_BG} ${BOLD}▸ ${RST}${SEL_BG}${dname}${suffix}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 4 - icon_vlen))
                 (( pad < 0 )) && pad=0
+                (( has_working_spinner )) && _queue_spinner_target "$((line + 1))" "$((3 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="${CUR_BG} ${ACC_GRN}▌${RST}${CUR_BG} ${dname}${suffix}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             else
                 pad=$((LW - vlen - 3 - icon_vlen))
                 (( pad < 0 )) && pad=0
+                (( has_working_spinner )) && _queue_spinner_target "$((line + 1))" "$((2 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="  ${dname}${suffix}"
                 buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             fi
@@ -468,16 +570,23 @@ render() {
             local ssh="${rest%%|*}"; rest="${rest#*|}"
             local is_last="$rest"
             [[ "$name" == "$cur_session" && -z "${_active_pane_in_child[$name]:-}" ]] && is_cur=1
+            local _spinner_bg="none"
+            (( is_sel )) && _spinner_bg="sel"
+            (( ! is_sel && is_cur )) && _spinner_bg="cur"
 
             # Build status indicator: compact counts or single icon
             local icon_str icon_vlen
             local counts="${PANE_COUNTS[$name]:-}"
+            local has_working_spinner=0
             if [[ -n "$counts" ]]; then
                 _render_counts "$counts"
                 icon_str="$_count_str"; icon_vlen=$_count_vlen
+                IFS=: read -r _cw _cd _cwt <<< "$counts"
+                (( _cw > 0 )) && has_working_spinner=1
             else
                 local _icon _ic; _set_icon_color "$state"
                 icon_str="${_ic}${_icon}${RST}"; icon_vlen=1
+                [[ "$state" == "working" ]] && has_working_spinner=1
             fi
 
             local tree="├"; [[ "$is_last" == "1" ]] && tree="└"
@@ -498,40 +607,46 @@ render() {
             if (( is_sel )); then
                 pad=$((LW - vlen - 8 - icon_vlen))
                 (( pad < 0 )) && pad=0
+                (( has_working_spinner )) && _queue_spinner_target "$((line + 1))" "$((7 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="${SEL_BG}   ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${dname}${suffix}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 8 - icon_vlen))
                 (( pad < 0 )) && pad=0
+                (( has_working_spinner )) && _queue_spinner_target "$((line + 1))" "$((7 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="${CUR_BG}   ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${dname}${suffix}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             else
                 pad=$((LW - vlen - 7 - icon_vlen))
                 (( pad < 0 )) && pad=0
+                (( has_working_spinner )) && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="    ${DIM}${tree}${RST} ${dname}${suffix}"
                 buf+="$(printf '%*s' "$pad" '')${icon_str}\033[K\n"
             fi
 
         elif [[ "$rtype" == "I" ]]; then
-            # Inbox item: I|session|pane_id|label|status
+            # Inbox item: I|session|token|label|status
             local rest="${entry#I|}"
             local sess="${rest%%|*}"; rest="${rest#*|}"
-            local pane_id="${rest%%|*}"; rest="${rest#*|}"
+            local token="${rest%%|*}"; rest="${rest#*|}"
             local label="${rest%%|*}"; rest="${rest#*|}"
             local istatus="$rest"
-            if [[ -n "$pane_id" ]]; then
-                [[ "$sess" == "$cur_session" && "$pane_id" == "$cur_pane" ]] && is_cur=1
+            if [[ -n "$token" ]]; then
+                if [[ "$token" == w* ]]; then
+                    [[ "$sess" == "$cur_session" && "${token#w}" == "$cur_window_index" ]] && is_cur=1
+                else
+                    [[ "$sess" == "$cur_session" && "$token" == "$cur_pane" ]] && is_cur=1
+                fi
             else
                 [[ "$sess" == "$cur_session" ]] && is_cur=1
             fi
-            # Mirror selection from SESSIONS section (match specific pane, not whole session)
+            # Mirror selection from SESSIONS section using the row's actual scope token.
             local sel_name="${SEL_NAMES[$SELECTED]:-}"
             local sel_type="${SEL_TYPES[$SELECTED]:-}"
             if [[ "$sel_type" == "P" ]]; then
-                # Selected a specific pane — only highlight matching pane inbox entry
-                local sel_sess="${sel_name%%:*}" sel_pane="${sel_name#*:}"
-                if [[ -n "$pane_id" ]]; then
-                    [[ "$sess" == "$sel_sess" && "$pane_id" == "$sel_pane" ]] && is_sel=1
+                local sel_sess="${sel_name%%:*}" sel_token="${sel_name#*:}"
+                if [[ -n "$token" ]]; then
+                    [[ "$sess" == "$sel_sess" && "$token" == "$sel_token" ]] && is_sel=1
                 else
                     [[ "$sess" == "$sel_sess" ]] && is_sel=1
                 fi
@@ -577,7 +692,14 @@ render() {
             local agent="${rest%%|*}"; rest="${rest#*|}"
             local pstatus="${rest%%|*}"; rest="${rest#*|}"
             local is_last="$rest"
-            [[ "$sess" == "$cur_session" && "$pane_id" == "$cur_pane" ]] && is_cur=1
+            local sel_name="${SEL_NAMES[$sidx]:-}"
+            local sel_type="${SEL_TYPES[$sidx]:-}"
+            if [[ "$sel_type" == "P" && "$sel_name" == *:w* ]]; then
+                local sel_sess="${sel_name%%:*}" sel_token="${sel_name#*:}"
+                [[ "$sess" == "$sel_sess" && "$sess" == "$cur_session" && "${sel_token#w}" == "$cur_window_index" ]] && is_cur=1
+            else
+                [[ "$sess" == "$cur_session" && "$pane_id" == "$cur_pane" ]] && is_cur=1
+            fi
 
             local _icon _ic; _set_icon_color "$pstatus"
             local tree="├"; [[ "$is_last" == "1" ]] && tree="└"
@@ -586,20 +708,26 @@ render() {
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
             local vlen=$(( ${#agent} + tag_vlen ))
             local pad
+            local _spinner_bg="none"
+            (( is_sel )) && _spinner_bg="sel"
+            (( ! is_sel && is_cur )) && _spinner_bg="cur"
 
             if (( is_sel )); then
                 pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
                 pad=$((LW - ${#agent} - 8))
                 (( pad < 0 )) && pad=0
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + ${#agent} + pad + 1))" "$_spinner_bg"
                 buf+="    ${DIM}${tree} ${agent}${RST}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             fi
@@ -622,20 +750,26 @@ render() {
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
             local vlen=$(( ${#agent} + tag_vlen ))
             local pad
+            local _spinner_bg="none"
+            (( is_sel )) && _spinner_bg="sel"
+            (( ! is_sel && is_cur )) && _spinner_bg="cur"
 
             if (( is_sel )); then
                 pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + vlen + pad + 1))" "$_spinner_bg"
                 buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
                 pad=$((LW - ${#agent} - 10))
                 (( pad < 0 )) && pad=0
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + ${#agent} + pad + 1))" "$_spinner_bg"
                 buf+="    ${DIM}${vert} ${tree} ${agent}${RST}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             fi
@@ -796,7 +930,7 @@ _selected_state() {
                 if (( sidx == SELECTED )); then
                     # Return the actual pane/window status, not a generic tag
                     local rest="${e#?|}" ; rest="${rest#*|}"
-                    rest="${rest#*|}" ; rest="${rest#*|}"
+                    rest="${rest#*|}" ; rest="${rest#*|}" ; rest="${rest#*|}"
                     echo "${rest%%|*}"
                     return
                 fi
@@ -804,10 +938,11 @@ _selected_state() {
                 ;;
             I)
                 if (( sidx == SELECTED )); then
-                    # Inbox items resolve to their parent session's state
                     local rest="${e#I|}"
-                    local sname="${rest%%|*}"
-                    echo "$(get_agent_status "$sname")"
+                    rest="${rest#*|}"
+                    rest="${rest#*|}"
+                    rest="${rest#*|}"
+                    echo "$rest"
                     return
                 fi
                 ((sidx++))
@@ -845,14 +980,7 @@ action_wait() {
                 echo "done" > "$STATUS_DIR/panes/${session}_${pane_id}.status" 2>/dev/null
             fi
             # Clear session-level wait if no pane waits remain
-            local has_remaining=0
-            for remaining in "$WAIT_DIR/${session}_"*.wait; do
-                [ -f "$remaining" ] && { has_remaining=1; break; }
-            done
-            if [ "$has_remaining" -eq 0 ]; then
-                rm -f "$WAIT_DIR/${session}.wait"
-                echo "done" > "$STATUS_DIR/${session}.status" 2>/dev/null
-            fi
+            sync_session_after_child_scope_change "$session"
         else
             # Session-level cancel
             local session="$raw_target"
@@ -887,102 +1015,59 @@ action_park() {
     (( SEL_COUNT == 0 )) && return
     local target="${SEL_NAMES[$SELECTED]}"
     local ttype="${SEL_TYPES[$SELECTED]}"
-    local state
-    state=$(_selected_state)
-
-    local session_name
-    if [[ "$ttype" == "P" ]]; then
-        session_name="${target%%:*}"
-        local pane_id="${target#*:}"
-
-        if [[ "$pane_id" == w* ]]; then
-            # Window-level park: park/unpark all panes in this window
-            local win_idx="${pane_id#w}"
-            if [[ "$state" == "parked" ]]; then
-                while IFS= read -r wp_id; do
-                    [ -z "$wp_id" ] && continue
-                    rm -f "$PARKED_DIR/${session_name}_${wp_id}.parked"
-                    local pf="$STATUS_DIR/panes/${session_name}_${wp_id}.status"
-                    [ -f "$pf" ] && [ "$(cat "$pf")" = "parked" ] && echo "done" > "$pf"
-                done < <(tmux list-panes -t "${session_name}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
-                rm -f "$PARKED_DIR/${session_name}.parked"
-            else
-                mkdir -p "$PARKED_DIR"
-                while IFS= read -r wp_id; do
-                    [ -z "$wp_id" ] && continue
-                    : > "$PARKED_DIR/${session_name}_${wp_id}.parked"
-                    echo "parked" > "$STATUS_DIR/panes/${session_name}_${wp_id}.status"
-                    rm -f "$WAIT_DIR/${session_name}_${wp_id}.wait" 2>/dev/null
-                done < <(tmux list-panes -t "${session_name}:${win_idx}" -F '#{pane_id}' 2>/dev/null)
-            fi
-        elif [[ "$state" == "parked" ]]; then
-            # Unpark this pane
-            rm -f "$PARKED_DIR/${session_name}_${pane_id}.parked"
-            local pf="$STATUS_DIR/panes/${session_name}_${pane_id}.status"
-            [ -f "$pf" ] && echo "done" > "$pf"
-            # If session was fully parked, remove session marker too
-            rm -f "$PARKED_DIR/${session_name}.parked"
-        else
-            # Park this pane
-            mkdir -p "$PARKED_DIR"
-            rm -f "$WAIT_DIR/${session_name}_${pane_id}.wait" 2>/dev/null
-            : > "$PARKED_DIR/${session_name}_${pane_id}.parked"
-            local pf="$STATUS_DIR/panes/${session_name}_${pane_id}.status"
-            [ -f "$pf" ] && echo "parked" > "$pf"
-        fi
-    else
-        # Session-level park/unpark
-        session_name="$target"
-        if [[ "$state" == "parked" ]]; then
-            rm -f "$PARKED_DIR/${session_name}.parked"
-            rm -f "$PARKED_DIR/${session_name}_"*.parked 2>/dev/null
-            if [ -f "$STATUS_DIR/${session_name}-remote.status" ]; then
-                echo "done" > "$STATUS_DIR/${session_name}-remote.status"
-            else
-                echo "done" > "$STATUS_DIR/${session_name}.status"
-            fi
-            for pf in "$STATUS_DIR/panes/${session_name}_"*.status; do
-                [ -f "$pf" ] && [ "$(cat "$pf")" = "parked" ] && echo "done" > "$pf"
-            done
-        else
-            mkdir -p "$PARKED_DIR"
-            rm -f "$WAIT_DIR/${session_name}.wait"
-            : > "$PARKED_DIR/${session_name}.parked"
-            if [ -f "$STATUS_DIR/${session_name}-remote.status" ]; then
-                echo "parked" > "$STATUS_DIR/${session_name}-remote.status"
-            else
-                echo "parked" > "$STATUS_DIR/${session_name}.status"
-            fi
-            # Park all panes
-            for pf in "$STATUS_DIR/panes/${session_name}_"*.status; do
-                [ -f "$pf" ] || continue
-                local pid
-                pid=$(basename "$pf" .status)
-                pid="${pid#${session_name}_}"
-                : > "$PARKED_DIR/${session_name}_${pid}.parked"
-                echo "parked" > "$pf"
-                rm -f "$WAIT_DIR/${session_name}_${pid}.wait" 2>/dev/null
-            done
-        fi
-    fi
+    bash "$CURRENT_DIR/park-target.sh" "$target" "$ttype"
     _LAST_STATUS_MTIME=""
 }
 
 # ─── Main loop ────────────────────────────────────────────────────
 NEEDS_COLLECT=1
-_idle_ticks=0
+NEEDS_RENDER=1
+ANIMATE_TICK=0
 while true; do
     # Exit if our pane/TTY is gone (prevents orphaned processes).
     [[ ! -t 0 ]] && exit 0
 
     if (( NEEDS_COLLECT )); then
+        prev_cache_mtime="$_LAST_STATUS_MTIME"
+        prev_cur="${CUR_SESSION}|${CUR_PANE}|${CUR_WINDOW_INDEX}"
         collect
-        _PREVIEW_DIRTY=1
+        cur_token="${CUR_SESSION}|${CUR_PANE}|${CUR_WINDOW_INDEX}"
+        if [[ "$_LAST_STATUS_MTIME" != "$prev_cache_mtime" ]]; then
+            NEEDS_RENDER=1
+            _PREVIEW_DIRTY=1
+        fi
+        [[ "$cur_token" != "$prev_cur" ]] && NEEDS_RENDER=1
     fi
     NEEDS_COLLECT=0
-    render
+    if (( RESIZED )); then
+        NEEDS_RENDER=1
+        _PREVIEW_DIRTY=1
+        RESIZED=0
+    fi
+    if (( NEEDS_RENDER )); then
+        render
+        NEEDS_RENDER=0
+        ANIMATE_TICK=0
+    elif (( ANIMATE_TICK )); then
+        animate_spinners
+        ANIMATE_TICK=0
+    fi
+    (( NEEDS_COLLECT )) && _COLLECT_TICK=0
 
-    if read -rsn1 -t 0.08 key; then
+    local_read_timeout=1
+    (( _HAS_WORKING )) && local_read_timeout=0.25
+
+    (( _COLLECT_TICK++ ))
+    local_poll_ticks=1
+    (( _HAS_WORKING )) && local_poll_ticks=4
+    if (( _COLLECT_TICK >= local_poll_ticks )); then
+        NEEDS_COLLECT=1
+        _COLLECT_TICK=0
+    fi
+    (( _HAS_WORKING )) && ANIMATE_TICK=1
+
+    if read -rsn1 -t "$local_read_timeout" key; then
+        NEEDS_RENDER=1
         # Handle escape sequences (arrows, mouse) shared by both modes.
         _handle_escape() {
             read -rsn2 -t 0.1 seq
@@ -1111,8 +1196,5 @@ while true; do
                 q)   exit 0 ;;
             esac
         fi
-    else
-        # Timeout (no keypress) — refresh data every ~1s (12 ticks × 0.08s)
-        (( ++_idle_ticks >= 12 )) && { NEEDS_COLLECT=1; _idle_ticks=0; }
     fi
 done

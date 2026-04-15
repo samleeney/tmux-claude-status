@@ -10,7 +10,7 @@ TARGET="${1:-}"
 
 # Read configured width.
 width=$(tmux show-option -gqv "@agent-sidebar-width" 2>/dev/null)
-[ -z "$width" ] && width=40
+[ -z "$width" ] && width=42
 
 # Build -t flag for list-panes when a target is given.
 target_flag=()

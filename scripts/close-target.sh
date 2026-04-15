@@ -91,32 +91,6 @@ refresh_session_tracking() {
     return 0
 }
 
-selection_includes_current_client() {
-    local sel_name="$1"
-    local sel_type="$2"
-    local scope session token
-    local current_session current_window current_pane
-
-    scope=$(selection_scope "$sel_name" "$sel_type") || return 1
-    session=$(selection_session "$sel_name" "$sel_type")
-    token=$(selection_token "$sel_name" "$sel_type")
-    current_session=$(tmux display-message -p "#{client_session}" 2>/dev/null || true)
-    current_window=$(tmux display-message -p "#{window_index}" 2>/dev/null || true)
-    current_pane=$(tmux display-message -p "#{pane_id}" 2>/dev/null || true)
-
-    case "$scope" in
-        session)
-            [ "$session" = "$current_session" ]
-            ;;
-        window)
-            [ "$session" = "$current_session" ] && [ "${token#w}" = "$current_window" ]
-            ;;
-        pane)
-            [ "$token" = "$current_pane" ]
-            ;;
-    esac
-}
-
 find_fallback_pane() {
     local sel_name="$1"
     local sel_type="$2"
@@ -164,6 +138,19 @@ switch_client_to_fallback() {
     tmux select-pane -t "$pane" 2>/dev/null || true
 }
 
+switch_client_to_next_inbox_or_fallback() {
+    local sel_name="$1"
+    local sel_type="$2"
+
+    selection_includes_current_client "$sel_name" "$sel_type" || return 0
+
+    if bash "$SCRIPT_DIR/next-done-project.sh" --exclude "$sel_name" "$sel_type" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    switch_client_to_fallback "$sel_name" "$sel_type"
+}
+
 apply_close() {
     local sel_name="$1"
     local sel_type="$2"
@@ -179,15 +166,15 @@ apply_close() {
         [ -n "$pane_id" ] && pane_ids+=("$pane_id")
     done < <(selection_list_panes "$sel_name" "$sel_type")
 
-    switch_client_to_fallback "$sel_name" "$sel_type"
-
     case "$scope" in
         pane)
+            switch_client_to_fallback "$sel_name" "$sel_type"
             cleanup_pane_state "$session" "$token"
             tmux kill-pane -t "$token" 2>/dev/null || true
             refresh_session_tracking "$session"
             ;;
         window)
+            switch_client_to_fallback "$sel_name" "$sel_type"
             local item=""
             for item in "${pane_ids[@]}"; do
                 cleanup_pane_state "$session" "$item"
@@ -196,6 +183,7 @@ apply_close() {
             refresh_session_tracking "$session"
             ;;
         session)
+            switch_client_to_next_inbox_or_fallback "$sel_name" "$sel_type"
             cleanup_session_state "$session"
             tmux kill-session -t "$session" 2>/dev/null || true
             ;;

@@ -7,6 +7,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/session-status.sh"
 source "$SCRIPT_DIR/lib/collect.sh"
+source "$SCRIPT_DIR/lib/status-summary.sh"
+source "$SCRIPT_DIR/lib/sidebar-clients.sh"
 
 CACHE_FILE="$STATUS_DIR/.sidebar-cache"
 PID_FILE="$STATUS_DIR/.sidebar-collector.pid"
@@ -38,6 +40,11 @@ SESS_START=0
 _COLLECT_TICK=0
 _LAST_STATUS_MTIME=""
 _COLLECT_CHANGED=0
+SUMMARY_WORKING=0
+SUMMARY_WAITING=0
+SUMMARY_DONE=0
+SUMMARY_TOTAL=0
+SUMMARY_HAS_WORKING=0
 
 _tab=$'\t'
 
@@ -62,14 +69,45 @@ serialize_cache() {
     mv -f "${CACHE_FILE}.tmp" "$CACHE_FILE"
 }
 
+publish_status_summary() {
+    local prev_done=""
+
+    if [ -f "$STATUS_LINE_COUNTS_FILE" ]; then
+        IFS=: read -r _ _ prev_done _ < "$STATUS_LINE_COUNTS_FILE"
+    fi
+
+    write_status_summary_cache \
+        "$SUMMARY_WORKING" \
+        "$SUMMARY_WAITING" \
+        "$SUMMARY_DONE" \
+        "$SUMMARY_TOTAL"
+
+    if (( ! RUN_ONCE )) && [ -n "$prev_done" ] && [ "$SUMMARY_DONE" -gt "$prev_done" ]; then
+        "$SCRIPT_DIR/play-sound.sh" &
+    fi
+}
+
+tick=0
 while true; do
     tmux list-sessions >/dev/null 2>&1 || exit 0
-    collect_data
-    if (( _COLLECT_CHANGED )); then
-        serialize_cache
+
+    if (( tick == 0 )); then
+        collect_data
+        if (( _COLLECT_CHANGED )); then
+            serialize_cache
+            publish_status_summary
+            (( ! RUN_ONCE )) && signal_sidebar_clients USR1 all
+        fi
     fi
+
     if (( RUN_ONCE )); then
         exit 0
     fi
-    sleep 1
+
+    if (( SUMMARY_HAS_WORKING )); then
+        signal_sidebar_clients USR2 active
+    fi
+
+    sleep 0.25
+    tick=$(( (tick + 1) % 4 ))
 done

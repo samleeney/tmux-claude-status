@@ -9,7 +9,9 @@
 #     KNOWN_AGENTS (associative), LIVE_PANES (associative), PID_PPID (associative),
 #     SESS_START, _COLLECT_TICK, _LAST_STATUS_MTIME
 #
-# Populates: ENTRIES[], SEL_NAMES[], SEL_TYPES[], PANE_COUNTS[], SESS_START
+# Populates: ENTRIES[], SEL_NAMES[], SEL_TYPES[], PANE_COUNTS[], SESS_START,
+#            SUMMARY_WORKING, SUMMARY_WAITING, SUMMARY_DONE, SUMMARY_TOTAL,
+#            SUMMARY_HAS_WORKING
 # Persists across calls: LIVE_PANES[]
 # Sets _COLLECT_CHANGED=1 when data was rebuilt, 0 when skipped (no changes).
 
@@ -54,13 +56,15 @@ _state_pri() {
 
 # ─── Main collection ──────────────────────────────────────────────
 collect_data() {
+    expire_wait_timers >/dev/null
+
     # Quick change detection: skip full rebuild if nothing changed.
     (( ++_COLLECT_TICK >= 10 )) && { _COLLECT_TICK=0; _LAST_STATUS_MTIME=""; }
     local cur_mtime
     if [[ "$(uname)" == "Darwin" ]]; then
-        cur_mtime=$(stat -f %m "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" "$PANE_DIR" 2>/dev/null)
+        cur_mtime=$(stat -f %m "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" "$PANE_DIR" "$REFRESH_FILE" 2>/dev/null)
     else
-        cur_mtime=$(stat -c %Y "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" "$PANE_DIR" 2>/dev/null)
+        cur_mtime=$(stat -c %Y "$STATUS_DIR" "$PARKED_DIR" "$WAIT_DIR" "$PANE_DIR" "$REFRESH_FILE" 2>/dev/null)
     fi
     if [[ "$cur_mtime" == "$_LAST_STATUS_MTIME" ]]; then
         _COLLECT_CHANGED=0
@@ -72,6 +76,11 @@ collect_data() {
     ENTRIES=()
     SEL_NAMES=()
     SEL_TYPES=()
+    SUMMARY_WORKING=0
+    SUMMARY_WAITING=0
+    SUMMARY_DONE=0
+    SUMMARY_TOTAL=0
+    SUMMARY_HAS_WORKING=0
 
     local now
     printf -v now '%(%s)T' -1
@@ -101,7 +110,7 @@ collect_data() {
 
         local state="noagent" extra="" is_ssh="" status=""
 
-        if [ -f "$PARKED_DIR/${sname}.parked" ]; then
+        if session_is_fully_parked "$sname"; then
             status="parked"
         elif [ -f "$STATUS_DIR/${sname}-remote.status" ]; then
             status=$(<"$STATUS_DIR/${sname}-remote.status")
@@ -109,6 +118,12 @@ collect_data() {
         fi
         if [ -f "$STATUS_DIR/${sname}.status" ]; then
             status=$(<"$STATUS_DIR/${sname}.status")
+        fi
+        if [ "$status" = "parked" ] && ! session_is_fully_parked "$sname"; then
+            status=""
+        fi
+        if [ "$status" = "wait" ] && [ ! -f "$WAIT_DIR/${sname}.wait" ]; then
+            status=""
         fi
         [ -n "$status" ] && state="$status"
 
@@ -245,6 +260,27 @@ collect_data() {
         sess_state[$sname]="$best_st"
     done
 
+    # ── 5a. Shared status-line summary counts ────────────────────
+    for sname in "${!sess_state[@]}"; do
+        case "${sess_state[$sname]}" in
+            working)
+                ((SUMMARY_WORKING++))
+                ((SUMMARY_TOTAL++))
+                SUMMARY_HAS_WORKING=1
+                ;;
+            wait)
+                ((SUMMARY_WAITING++))
+                ((SUMMARY_TOTAL++))
+                ;;
+            done|ask)
+                ((SUMMARY_DONE++))
+                ((SUMMARY_TOTAL++))
+                ;;
+            *)
+                ;;
+        esac
+    done
+
     # ── 5b. Compute per-session pane counts ─────────────────────
     PANE_COUNTS=()
     for sname in "${!sess_agents[@]}"; do
@@ -294,6 +330,14 @@ collect_data() {
         done
         eff_state[$parent]="$best"
     done
+
+    local all_sessions=()
+    for sname in "${!sess_state[@]}"; do
+        all_sessions+=("$sname")
+    done
+    if (( ${#all_sessions[@]} > 0 )); then
+        IFS=$'\n' all_sessions=($(sort <<< "${all_sessions[*]}")); unset IFS
+    fi
 
     # ── 8. Build ENTRIES ─────────────────────────────────────────
 
@@ -350,7 +394,7 @@ collect_data() {
                     local pid="${ap%%:*}" r="${ap#*:}"
                     local st="${r#*:}"
                     ENTRIES+=("P|${sname}|${pid}|${wname}|${st}|${w_last}")
-                    SEL_NAMES+=("${sname}:${pid}")
+                    SEL_NAMES+=("${sname}:w${widx}")
                     SEL_TYPES+=("P")
                 else
                     local best_pri=-1 best_st="noagent"
@@ -400,64 +444,85 @@ collect_data() {
 
     # ── INBOX ────────────────────────────────────────────────────
     local inbox=()
-    for sname in "${!sess_agents[@]}"; do
-        [[ -f "$PARKED_DIR/${sname}.parked" ]] && continue
-        _get_agent_arr "$sname"
-        local arr=("${_agent_result[@]}")
-        if (( ${#arr[@]} <= 1 )); then
-            local ap="${arr[0]:-}"
-            local pst="${ap#*:}"; pst="${pst#*:}"
-            [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}||${sname}|done")
+    for sname in "${all_sessions[@]}"; do
+        session_is_fully_parked "$sname" && continue
+        if [[ -n "${sess_agents[$sname]:-}" ]]; then
+            _get_agent_arr "$sname"
+            local arr=("${_agent_result[@]}")
+            if (( ${#arr[@]} <= 1 )); then
+                local ap="${arr[0]:-}"
+                local pst="${ap#*:}"; pst="${pst#*:}"
+                [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}||${sname}|done")
+                continue
+            fi
+
+            local -A _ib_win=()
+            for ap in "${arr[@]}"; do
+                local pid="${ap%%:*}"
+                local wi="${pane_to_window[$pid]:-0}"
+                _ib_win[$wi]+="$ap "
+            done
+
+            if (( ${#_ib_win[@]} == 1 )); then
+                local only_wi=""
+                for only_wi in "${!_ib_win[@]}"; do
+                    break
+                done
+
+                local ai=0
+                local pid=""
+                while IFS= read -r pid; do
+                    [ -n "$pid" ] || continue
+
+                    local ap=""
+                    local candidate=""
+                    for candidate in ${_ib_win[$only_wi]}; do
+                        [ "${candidate%%:*}" = "$pid" ] || continue
+                        ap="$candidate"
+                        break
+                    done
+                    [ -n "$ap" ] || continue
+
+                    ((ai++))
+                    local r="${ap#*:}"
+                    local aname="${r%%:*}"
+                    local pst="${r#*:}"
+                    [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}|${pid}|${sname} › ${aname} #${ai}|done")
+                done < <(tmux list-panes -t "${sname}:${only_wi}" -F "#{pane_id}" 2>/dev/null)
+            else
+                local wi=""
+                while IFS= read -r wi; do
+                    [ -n "${_ib_win[$wi]:-}" ] || continue
+
+                    local wname="${window_names[${sname}:${wi}]:-window-$wi}"
+                    local any_done=0
+                    local wap=""
+                    for wap in ${_ib_win[$wi]}; do
+                        local ws="${wap#*:}"
+                        ws="${ws#*:}"
+                        [[ "$ws" == "done" || "$ws" == "ask" ]] && any_done=1
+                    done
+                    (( any_done )) && inbox+=("I|${sname}|w${wi}|${sname} › ${wname}|done")
+                done < <(tmux list-windows -t "$sname" -F "#{window_index}" 2>/dev/null)
+            fi
+
             continue
         fi
-        local -A _ib_win=() _ib_wseen=()
-        local -a _ib_worder=()
-        for ap in "${arr[@]}"; do
-            local pid="${ap%%:*}"
-            local wi="${pane_to_window[$pid]:-0}"
-            [[ -z "${_ib_wseen[$wi]:-}" ]] && { _ib_worder+=("$wi"); _ib_wseen[$wi]=1; }
-            _ib_win[$wi]+="$ap "
-        done
-        if (( ${#_ib_worder[@]} == 1 )); then
-            local ai=0
-            for ap in "${arr[@]}"; do
-                ((ai++))
-                local pid="${ap%%:*}" r="${ap#*:}"
-                local aname="${r%%:*}" pst="${r#*:}"
-                [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}|${pid}|${sname} › ${aname} #${ai}|done")
-            done
-        else
-            for wi in "${_ib_worder[@]}"; do
-                local wname="${window_names[${sname}:${wi}]:-window-$wi}"
-                local any_done=0 w_pid=""
-                for wap in ${_ib_win[$wi]}; do
-                    local pid="${wap%%:*}" ws="${wap#*:}"; ws="${ws#*:}"
-                    [[ -z "$w_pid" ]] && w_pid="$pid"
-                    [[ "$ws" == "done" || "$ws" == "ask" ]] && any_done=1
-                done
-                (( any_done )) && inbox+=("I|${sname}|${w_pid}|${sname} › ${wname}|done")
-            done
-        fi
-    done
-    # Single-agent sessions not in sess_agents
-    for sname in "${!sess_state[@]}"; do
-        [[ -n "${sess_agents[$sname]:-}" ]] && continue
-        [[ -f "$PARKED_DIR/${sname}.parked" ]] && continue
+
         [[ -n "${worktree_parent[$sname]:-}" ]] && continue
         local st="${eff_state[$sname]}"
         [[ "$st" == "done" || "$st" == "ask" ]] && inbox+=("I|${sname}||${sname}|done")
     done
 
     if (( ${#inbox[@]} > 0 )); then
-        IFS=$'\n' inbox=($(sort -t'|' -k4 <<< "${inbox[*]}")); unset IFS
         ENTRIES+=("G|INBOX|green")
         for entry in "${inbox[@]}"; do
             ENTRIES+=("$entry")
             local r="${entry#I|}"
             local sname="${r%%|*}"; r="${r#*|}"
-            local pid="${r%%|*}"
-            if [[ -n "$pid" ]]; then
-                SEL_NAMES+=("${sname}:${pid}")
+            local token="${r%%|*}"
+            if [[ -n "$token" ]]; then
+                SEL_NAMES+=("${sname}:${token}")
                 SEL_TYPES+=("P")
             else
                 SEL_NAMES+=("$sname")
@@ -468,11 +533,10 @@ collect_data() {
 
     # ── SESSIONS ─────────────────────────────────────────────────
     local sorted_sessions=()
-    for sname in "${!sess_state[@]}"; do
+    for sname in "${all_sessions[@]}"; do
         [[ -n "${worktree_parent[$sname]:-}" ]] && continue
         sorted_sessions+=("$sname")
     done
-    IFS=$'\n' sorted_sessions=($(sort <<< "${sorted_sessions[*]}")); unset IFS
 
     SESS_START=${#SEL_NAMES[@]}
     if (( ${#sorted_sessions[@]} > 0 )); then

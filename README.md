@@ -245,6 +245,12 @@ set -g @agent-park-key "p"
 set -g @agent-switcher-style "both"        # popup | sidebar | both
 set -g @agent-status-display-method "popup" # popup | window
 set -g @agent-sidebar-width "42"
+
+# Optional: bind a key to open a flat "inbox" popup of panes that
+# need attention (working / done / ask / wait). Parked panes are
+# hidden. Tab toggles a live preview of the hovered pane; Enter
+# switches to it. Disabled by default; avoid "I" (TPM uses it).
+set -g @agent-inbox-key "B"
 ```
 
 `@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.

@@ -11,8 +11,9 @@ REFRESH_FILE="$STATUS_DIR/.sidebar-refresh"
 mkdir -p "$STATUS_DIR" "$WAIT_DIR" "$PARKED_DIR" "$PANE_DIR"
 [ -f "$REFRESH_FILE" ] || : > "$REFRESH_FILE"
 
-# Drain JSON from stdin (required by Claude Code hooks).
-cat >/dev/null 2>&1 || true
+# Read JSON from stdin (required by Claude Code hooks). The Stop payload
+# carries a `background_tasks` array that we inspect below.
+HOOK_JSON="$(cat 2>/dev/null || true)"
 
 in_remote_session() {
     [ -n "${SSH_CONNECTION:-}" ] || [ -n "${SSH_TTY:-}" ]
@@ -107,6 +108,37 @@ mark_refresh() {
     touch "$REFRESH_FILE" 2>/dev/null || true
 }
 
+# Returns 0 if the Claude Code Stop payload reports a background task that is
+# still running (e.g. a `run_in_background` Bash command). When the agent ends
+# its turn while a background task keeps working, it isn't really idle, so we
+# keep it "working" instead of flipping to "done". Claude re-invokes the agent
+# when the task finishes, firing another Stop with an empty (or all-finished)
+# background_tasks array, which then marks the session done.
+#
+# Older Claude versions omit the field entirely; that yields no match and the
+# Stop is treated as done, matching the previous behaviour.
+has_running_background_task() {
+    local json="$1"
+    [ -n "$json" ] || return 1
+
+    if command -v jq >/dev/null 2>&1; then
+        local count
+        count="$(printf '%s' "$json" | \
+            jq -r '[.background_tasks[]? | select(.status == "running")] | length' \
+            2>/dev/null)"
+        [ -n "$count" ] && [ "$count" -gt 0 ] 2>/dev/null
+        return
+    fi
+
+    # Fallback without jq: an empty array is "background_tasks":[] and is
+    # rejected first; otherwise look for a running task in a populated array.
+    case "$json" in
+        *'"background_tasks":[]'*) return 1 ;;
+        *'"background_tasks":['*'"status":"running"'*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 TMUX_SESSION=$(get_tmux_session) || exit 0
 HOOK_TYPE="${1:-}"
 WAIT_FILE="$WAIT_DIR/${TMUX_SESSION}.wait"
@@ -132,8 +164,14 @@ case "$HOOK_TYPE" in
         ;;
     Stop)
         # Claude has finished responding (SubagentStop excluded - subagents
-        # finishing doesn't mean the main agent is done).
-        set_status "$TMUX_SESSION" "done"
+        # finishing doesn't mean the main agent is done). If the turn ended
+        # while a background task is still running, the agent isn't idle yet —
+        # keep it working until a later Stop reports the task finished.
+        if has_running_background_task "$HOOK_JSON"; then
+            set_status "$TMUX_SESSION" "working"
+        else
+            set_status "$TMUX_SESSION" "done"
+        fi
         mark_refresh
         ;;
     Notification)

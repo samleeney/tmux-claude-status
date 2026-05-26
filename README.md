@@ -104,7 +104,7 @@ Add hooks to `~/.claude/settings.json`:
 }
 ```
 
-Claude Code state is tracked entirely through hooks, so the plugin gets precise working/done transitions directly from the agent.
+Claude Code state is tracked entirely through hooks, so the plugin gets precise working/done transitions directly from the agent. If a turn ends while a background task is still running (e.g. a `run_in_background` Bash command), the `Stop` payload's `background_tasks` array keeps the session marked `working` until a later `Stop` reports the task finished — so backgrounded work doesn't show a premature green checkmark.
 
 ## Codex CLI Setup
 

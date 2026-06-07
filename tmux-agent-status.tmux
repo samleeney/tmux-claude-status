@@ -44,16 +44,19 @@ sidebar_key=$(tmux show-option -gqv "@agent-sidebar-key")
 # script can pick the right initial view without an extra CLI flag.
 bind_fzf_switcher() {
     local key="$1"
+    local launch
     case "$display_method" in
         "window")
-            local launch="env TMUX_AGENT_SWITCHER_MODE=$switcher_default_mode $CURRENT_DIR/scripts/hook-based-switcher.sh"
+            printf -v launch 'env TMUX_AGENT_SWITCHER_MODE=%q %q' \
+                "$switcher_default_mode" "$CURRENT_DIR/scripts/hook-based-switcher.sh"
             tmux bind-key "$key" new-window -n "agent-status" "$launch"
             ;;
         "popup"|*)
             # Popup geometry varies by mode + preview state, so the popup
             # loop wrapper owns the display-popup invocation and relaunches
             # with new dimensions when the inner script requests it.
-            local launch="env TMUX_AGENT_SWITCHER_MODE=$switcher_default_mode $CURRENT_DIR/scripts/switcher-popup-loop.sh"
+            printf -v launch 'env TMUX_AGENT_SWITCHER_MODE=%q %q' \
+                "$switcher_default_mode" "$CURRENT_DIR/scripts/switcher-popup-loop.sh"
             tmux bind-key "$key" run-shell -b "$launch"
             ;;
     esac

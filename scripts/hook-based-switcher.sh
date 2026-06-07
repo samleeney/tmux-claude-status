@@ -561,6 +561,12 @@ case "${SWITCHER_COMMAND:-}" in
                     printf '1' > "$SWITCHER_STATE_DIR/preview-hidden"
                 fi
                 ;;
+            *)
+                # Unknown subcommand: bail without touching the relaunch
+                # sentinel so the popup-loop wrapper exits instead of
+                # spinning on unchanged state.
+                exit 0
+                ;;
         esac
         touch "$SWITCHER_STATE_DIR/relaunch"
         exit 0

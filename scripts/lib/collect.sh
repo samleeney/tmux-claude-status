@@ -54,9 +54,26 @@ _state_pri() {
     esac
 }
 
+# ─── Sidebar mode (tree | agents) ─────────────────────────────────
+# Set by sidebar-toggle-mode.sh. In agents mode the SESSIONS section
+# only includes sessions/worktrees that have at least one agent pane,
+# and every agent pane is expanded (even when a session has just one).
+_sidebar_mode() {
+    local mode_file="$STATUS_DIR/.sidebar-mode"
+    local mode=""
+    [ -f "$mode_file" ] && mode=$(<"$mode_file")
+    case "$mode" in
+        agents) echo agents ;;
+        *)      echo tree ;;
+    esac
+}
+
 # ─── Main collection ──────────────────────────────────────────────
 collect_data() {
     expire_wait_timers >/dev/null
+
+    local SIDEBAR_MODE
+    SIDEBAR_MODE=$(_sidebar_mode)
 
     # Quick change detection: skip full rebuild if nothing changed.
     (( ++_COLLECT_TICK >= 10 )) && { _COLLECT_TICK=0; _LAST_STATUS_MTIME=""; }
@@ -359,7 +376,13 @@ collect_data() {
         local sname="$1"
         _get_agent_arr "$sname"
         local agents=("${_agent_result[@]}")
-        (( ${#agents[@]} <= 1 )) && return
+        # Tree mode collapses single-agent sessions to just the session row.
+        # Agents mode expands every agent pane, even when there is only one.
+        if [[ "$SIDEBAR_MODE" != "agents" ]]; then
+            (( ${#agents[@]} <= 1 )) && return
+        else
+            (( ${#agents[@]} == 0 )) && return
+        fi
 
         local -A win_agents=() win_seen=()
         local -a win_order=()
@@ -428,7 +451,13 @@ collect_data() {
 
         local wt_list="${worktree_children[$sname]:-}"
         local wt_names=()
-        for wt in $wt_list; do wt_names+=("$wt"); done
+        for wt in $wt_list; do
+            # In agents mode, hide worktree children that have no agents.
+            if [[ "$SIDEBAR_MODE" == "agents" ]] && [[ -z "${sess_agents[$wt]:-}" ]]; then
+                continue
+            fi
+            wt_names+=("$wt")
+        done
         local wi=0
         for wt in "${wt_names[@]}"; do
             ((wi++))
@@ -535,6 +564,21 @@ collect_data() {
     local sorted_sessions=()
     for sname in "${all_sessions[@]}"; do
         [[ -n "${worktree_parent[$sname]:-}" ]] && continue
+        # In agents mode, only list sessions that have at least one
+        # agent pane (after collapsing single-worktree-parents above,
+        # a parent inherits its worktree children through eff_state but
+        # not through sess_agents — so also keep it if any of its
+        # worktree children carry agents).
+        if [[ "$SIDEBAR_MODE" == "agents" ]]; then
+            local _has_agents=0
+            [[ -n "${sess_agents[$sname]:-}" ]] && _has_agents=1
+            if (( ! _has_agents )); then
+                for _wt in ${worktree_children[$sname]:-}; do
+                    [[ -n "${sess_agents[$_wt]:-}" ]] && { _has_agents=1; break; }
+                done
+            fi
+            (( _has_agents )) || continue
+        fi
         sorted_sessions+=("$sname")
     done
 

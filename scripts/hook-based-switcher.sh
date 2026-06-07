@@ -58,6 +58,7 @@ pane_agent_badge() {
 SWITCHER_STATE_DIR=""
 EXPANDED_SESSIONS_FILE=""
 EXPANDED_WINDOWS_FILE=""
+MODE_FILE=""
 
 configure_state_dir() {
     SWITCHER_STATE_DIR="$1"
@@ -66,7 +67,47 @@ configure_state_dir() {
     mkdir -p "$SWITCHER_STATE_DIR"
     EXPANDED_SESSIONS_FILE="$SWITCHER_STATE_DIR/expanded_sessions"
     EXPANDED_WINDOWS_FILE="$SWITCHER_STATE_DIR/expanded_windows"
+    MODE_FILE="$SWITCHER_STATE_DIR/mode"
     touch "$EXPANDED_SESSIONS_FILE" "$EXPANDED_WINDOWS_FILE"
+}
+
+current_mode() {
+    local mode=""
+    [ -n "$MODE_FILE" ] && [ -f "$MODE_FILE" ] && mode=$(<"$MODE_FILE")
+    case "$mode" in
+        agents) echo agents ;;
+        *)      echo tree ;;
+    esac
+}
+
+set_mode() {
+    local mode="$1"
+    [ -n "$MODE_FILE" ] || return 0
+    case "$mode" in
+        tree|agents) printf '%s' "$mode" > "$MODE_FILE" ;;
+    esac
+}
+
+toggle_mode() {
+    if [ "$(current_mode)" = "agents" ]; then
+        set_mode tree
+    else
+        set_mode agents
+    fi
+}
+
+# Display priority for agents mode (ask first, then done, then working,
+# then wait, then parked). Distinct from status_priority used elsewhere
+# for "best status" rollups.
+agents_mode_priority() {
+    case "$1" in
+        ask)     echo 5 ;;
+        done)    echo 4 ;;
+        working) echo 3 ;;
+        wait)    echo 2 ;;
+        parked)  echo 1 ;;
+        *)       echo 0 ;;
+    esac
 }
 
 state_has_line() {
@@ -250,6 +291,55 @@ get_switcher_list() {
     get_switcher_rows | cut -f3-
 }
 
+# Flat list of every agent pane (any status), sorted by agents-mode
+# priority then by tmux list-panes order. Emits the same `P\t<session>:<pane_id>\t<display>`
+# row shape as get_switcher_rows so the existing fzf bindings continue to work.
+get_agents_rows() {
+    local tab=$'\t'
+
+    {
+    local session pane_id win_idx win_name cmd pane_title
+    local order=0
+
+    while IFS=$'\t' read -r session pane_id win_idx win_name cmd pane_title; do
+        [ -z "$session" ] && continue
+        [ "$pane_title" = "agent-sidebar" ] && continue
+
+        local status
+        status=$(get_pane_status "$session" "$pane_id")
+        case "$status" in
+            working|done|ask|wait|parked) ;;
+            *) continue ;;
+        esac
+
+        local pri icon agent badge=""
+        pri=$(agents_mode_priority "$status")
+        icon=$(status_icon "$status")
+
+        agent=""
+        [ -f "$PANE_DIR/${session}_${pane_id}.agent" ] && agent=$(<"$PANE_DIR/${session}_${pane_id}.agent")
+        [ -n "$agent" ] && badge=" [$agent]"
+
+        # SORTKEY \t row …  SORTKEY = pri (desc) + order (asc)
+        printf '%d\t%010d\tP\t%s:%s\t%b  %-7s  %s:%s.%s%s  %s\n' \
+            "$pri" "$order" \
+            "$session" "$pane_id" \
+            "$icon" "$status" "$session" "$win_idx" "${pane_id#%}" "$badge" "$win_name"
+
+        order=$((order + 1))
+    done < <(tmux list-panes -a -F \
+        "#{session_name}${tab}#{pane_id}${tab}#{window_index}${tab}#{window_name}${tab}#{pane_current_command}${tab}#{pane_title}" 2>/dev/null)
+    } | sort -k1,1nr -k2,2n | cut -f3-
+}
+
+emit_rows_for_mode() {
+    if [ "$(current_mode)" = "agents" ]; then
+        get_agents_rows
+    else
+        get_switcher_rows
+    fi
+}
+
 dispatch_close_job() {
     local sel_name="$1"
     local sel_type="$2"
@@ -315,9 +405,14 @@ parse_args() {
                 configure_state_dir "$2"
                 shift 2
                 ;;
-            --rows|--list|--reset|--reset-rows)
+            --rows|--list|--reset|--reset-rows|--rows-agents|--rows-tree|--toggle-mode|--tab-action|--preview-action)
                 SWITCHER_COMMAND="$1"
                 shift
+                ;;
+            --set-mode|--request-relaunch)
+                SWITCHER_COMMAND="$1"
+                SWITCHER_ARG1="${2:-}"
+                shift 2
                 ;;
             --close|--popup-close|--toggle-expand|--close-fzf-actions)
                 SWITCHER_COMMAND="$1"
@@ -392,11 +487,82 @@ parse_args "$@"
 
 case "${SWITCHER_COMMAND:-}" in
     --rows)
+        emit_rows_for_mode
+        exit 0
+        ;;
+    --rows-tree)
         get_switcher_rows
+        exit 0
+        ;;
+    --rows-agents)
+        get_agents_rows
         exit 0
         ;;
     --list)
         get_switcher_list
+        exit 0
+        ;;
+    --set-mode)
+        set_mode "$SWITCHER_ARG1"
+        exit 0
+        ;;
+    --toggle-mode)
+        toggle_mode
+        exit 0
+        ;;
+    --tab-action)
+        # Tab key behavior depends on current mode:
+        #   tree   → expand/collapse session/window then reload rows
+        #   agents → toggle preview pane. When wrapped by the popup-loop
+        #            we abort + relaunch the popup with new dimensions;
+        #            otherwise (window display-method) we change the
+        #            preview-window in-place.
+        if [ "$(current_mode)" = "agents" ]; then
+            if [ -n "${TMUX_AGENT_SWITCHER_STATE_DIR:-}" ]; then
+                printf "execute-silent(bash %q --state-dir %q --request-relaunch toggle-preview)+abort\n" \
+                    "$0" "$SWITCHER_STATE_DIR"
+            else
+                printf 'change-preview-window(right,65%%,border-left,wrap|right,65%%,border-left,wrap,hidden)\n'
+            fi
+        else
+            printf "execute-silent(bash %q --state-dir %q --toggle-expand {2} {1})+reload(bash %q --state-dir %q --rows)\n" \
+                "$0" "$SWITCHER_STATE_DIR" "$0" "$SWITCHER_STATE_DIR"
+        fi
+        exit 0
+        ;;
+    --preview-action)
+        # Used only by the in-process ctrl-f flow (window display-method).
+        # Wrapped popup uses --request-relaunch instead.
+        if [ "$(current_mode)" = "agents" ]; then
+            printf 'change-preview-window(right,65%%,border-left,wrap)\n'
+        else
+            printf 'change-preview-window(hidden)\n'
+        fi
+        exit 0
+        ;;
+    --request-relaunch)
+        # Signal the popup-loop wrapper to relaunch with new dimensions.
+        case "$SWITCHER_ARG1" in
+            toggle-mode)
+                toggle_mode
+                # When swapping to agents, default preview back on; tree → off.
+                if [ "$(current_mode)" = "agents" ]; then
+                    printf '0' > "$SWITCHER_STATE_DIR/preview-hidden"
+                else
+                    printf '1' > "$SWITCHER_STATE_DIR/preview-hidden"
+                fi
+                ;;
+            toggle-preview)
+                cur=0
+                [ -f "$SWITCHER_STATE_DIR/preview-hidden" ] && cur=$(<"$SWITCHER_STATE_DIR/preview-hidden")
+                if [ "$cur" = "1" ]; then
+                    printf '0' > "$SWITCHER_STATE_DIR/preview-hidden"
+                else
+                    printf '1' > "$SWITCHER_STATE_DIR/preview-hidden"
+                fi
+                ;;
+        esac
+        touch "$SWITCHER_STATE_DIR/relaunch"
         exit 0
         ;;
     --close)
@@ -428,21 +594,92 @@ case "${SWITCHER_COMMAND:-}" in
 esac
 
 # ─── Main: fzf picker ────────────────────────────────────────────
-state_dir=$(mktemp -d "${TMPDIR:-/tmp}/tmux-agent-status-switcher.XXXXXX")
-trap 'rm -rf "$state_dir"' EXIT
+# If the popup-loop wrapper provided a state dir, reuse it (mode and
+# preview-hidden state survive across relaunches). Otherwise own one.
+if [ -n "${TMUX_AGENT_SWITCHER_STATE_DIR:-}" ]; then
+    state_dir="$TMUX_AGENT_SWITCHER_STATE_DIR"
+    OWN_STATE_DIR=0
+else
+    state_dir=$(mktemp -d "${TMPDIR:-/tmp}/tmux-agent-status-switcher.XXXXXX")
+    OWN_STATE_DIR=1
+fi
 configure_state_dir "$state_dir"
 
-selected=$(get_switcher_rows | fzf \
+# Initial mode: state file (wrapper) wins; else env var; else tree.
+if [ -f "$state_dir/mode" ]; then
+    initial_mode=$(<"$state_dir/mode")
+else
+    initial_mode="${TMUX_AGENT_SWITCHER_MODE:-tree}"
+fi
+case "$initial_mode" in
+    tree|agents) ;;
+    *) initial_mode=tree ;;
+esac
+set_mode "$initial_mode"
+
+socket="$state_dir/fzf.sock"
+if [ "$OWN_STATE_DIR" = "1" ]; then
+    trap 'rm -rf "$state_dir"' EXIT
+else
+    trap 'rm -f "$socket"' EXIT
+fi
+
+# Background poker for agents-mode live refresh. Only pokes while
+# mode=agents — in tree mode it idles (manual reload via ctrl-r).
+if command -v curl >/dev/null 2>&1; then
+    refresh_action=$(printf 'reload(bash %q --state-dir %q --rows)' "$0" "$state_dir")
+    (
+        while [ ! -S "$socket" ]; do sleep 0.1; done
+        while [ -S "$socket" ]; do
+            if [ "$(current_mode)" = "agents" ]; then
+                curl --silent --unix-socket "$socket" -X POST http://localhost \
+                    -d "$refresh_action" >/dev/null 2>&1 || break
+            fi
+            sleep 2
+        done
+    ) &
+    refresh_pid=$!
+    if [ "$OWN_STATE_DIR" = "1" ]; then
+        trap 'kill "$refresh_pid" 2>/dev/null || true; rm -rf "$state_dir"' EXIT
+    else
+        trap 'kill "$refresh_pid" 2>/dev/null || true; rm -f "$socket"' EXIT
+    fi
+fi
+
+# Preview-window visibility: state file wins (set by wrapper or prior
+# iteration); else default by mode (hidden in tree, shown in agents).
+if [ -f "$state_dir/preview-hidden" ] && [ "$(<"$state_dir/preview-hidden")" = "1" ]; then
+    preview_hidden_flag=",hidden"
+elif [ -f "$state_dir/preview-hidden" ]; then
+    preview_hidden_flag=""
+elif [ "$initial_mode" = "tree" ]; then
+    preview_hidden_flag=",hidden"
+else
+    preview_hidden_flag=""
+fi
+
+# ctrl-f binding: when wrapped by popup-loop, abort + relaunch with new
+# popup geometry; otherwise toggle in-place (window display-method).
+if [ -n "${TMUX_AGENT_SWITCHER_STATE_DIR:-}" ]; then
+    ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --request-relaunch toggle-mode)+abort"
+else
+    ctrl_f_bind="execute-silent(bash '$0' --state-dir '$state_dir' --toggle-mode)+reload(bash '$0' --state-dir '$state_dir' --rows)+transform(bash '$0' --state-dir '$state_dir' --preview-action)"
+fi
+
+selected=$(emit_rows_for_mode | fzf \
     --ansi \
     --delimiter=$'\t' \
     --with-nth=3.. \
     --no-sort \
-    --no-preview \
+    --listen="$socket" \
+    --preview='id={2}; tmux capture-pane -e -p -t "${id##*:}" -S -120 2>/dev/null' \
+    --preview-window="right,65%,border-left,wrap${preview_hidden_flag}" \
     --prompt="  " \
-    --header=$'\033[90mctrl-j/k scroll  tab expand/collapse  ctrl-x close  ctrl-p park  ctrl-w wait  ctrl-r reset\033[0m' \
+    --header=$'\033[90mctrl-f mode  tab expand/preview  ctrl-x close  ctrl-p park  ctrl-w wait  ctrl-r reset\033[0m' \
     --header-first \
     --bind="ctrl-j:down,ctrl-k:up" \
-    --bind="tab:execute-silent(bash '$0' --state-dir '$state_dir' --toggle-expand {2} {1})+reload(bash '$0' --state-dir '$state_dir' --rows)" \
+    --bind="tab:transform(bash '$0' --state-dir '$state_dir' --tab-action)" \
+    --bind="ctrl-f:$ctrl_f_bind" \
     --bind="ctrl-p:execute-silent(bash '$SCRIPT_DIR/park-target.sh' {2} {1})+reload(bash '$0' --state-dir '$state_dir' --rows)" \
     --bind="ctrl-w:execute-silent(bash '$SCRIPT_DIR/wait-target.sh' {2} {1})+abort" \
     --bind="ctrl-r:reload(bash '$0' --state-dir '$state_dir' --reset-rows)" \

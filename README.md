@@ -246,14 +246,17 @@ set -g @agent-switcher-style "both"        # popup | sidebar | both
 set -g @agent-status-display-method "popup" # popup | window
 set -g @agent-sidebar-width "42"
 
-# Optional: bind a key to open a flat "inbox" popup of panes that
-# need attention (working / done / ask / wait). Parked panes are
-# hidden. Tab toggles a live preview of the hovered pane; Enter
-# switches to it. Disabled by default; avoid "I" (TPM uses it).
-set -g @agent-inbox-key "B"
+# Switcher view (prefix + S). "tree" is the hierarchical
+# session/window/pane list (default). "agents" is a flat list of every
+# agent pane sorted by status. Toggle mid-session with ctrl-f.
+set -g @agent-switcher-default-mode "tree"  # tree | agents
 ```
 
 `@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.
+
+The switcher popup has two views. **Tree** (default) is the hierarchical session/window/pane list; tab expands/collapses. **Agents** is a flat list of every agent pane (any status) sorted by priority — `ask`, `done`, `working`, `wait`, `parked` — with a live preview pane and 2-second refresh. Press `ctrl-f` inside the popup to toggle between views.
+
+The sidebar has the same two views, toggled with `m` from inside the sidebar pane (alongside `w`/`p`/`x` for wait/park/close). In **tree** mode the SESSIONS section lists every session and collapses single-agent sessions to one row; the INBOX section surfaces `done`/`ask` work. In **agents** mode the SESSIONS section is filtered to sessions/worktrees that contain agent panes and every agent pane is expanded; INBOX is suppressed because it would duplicate the same rows.
 
 ## Notification Sounds
 

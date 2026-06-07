@@ -791,7 +791,7 @@ render() {
     elif (( SEARCH_ACTIVE )); then
         buf+=" ${DIM}type to filter  ⏎ select  esc cancel${RST}\033[K"
     else
-        buf+=" ${DIM}⏎ select  / search  w wait  p park  q quit${RST}\033[K"
+        buf+=" ${DIM}⏎ select  / search  w wait  p park  m mode  q quit${RST}\033[K"
     fi
 
     # Flush entire frame at once (no flicker)
@@ -1187,6 +1187,9 @@ while true; do
                 '')  action_switch ;;
                 w)   action_wait; NEEDS_COLLECT=1 ;;
                 p)   action_park; NEEDS_COLLECT=1 ;;
+                m)   "$CURRENT_DIR/sidebar-toggle-mode.sh" >/dev/null 2>&1
+                     NEEDS_COLLECT=1
+                     ;;
                 x)   action_close ;;
                 r)   "$CURRENT_DIR/hook-based-switcher.sh" --reset >/dev/null 2>&1
                      KNOWN_AGENTS=()

@@ -7,22 +7,25 @@ default_switcher_key="S"
 default_next_done_key="N"
 default_wait_key="W"
 default_park_key="p"
-# Inbox is opt-in: empty default means no binding. TPM owns prefix+I,
-# so do not default to "I".
-default_inbox_key=""
 
 # Get user configuration or use defaults.
 switcher_key=$(tmux show-option -gqv "@agent-status-key")
 next_done_key=$(tmux show-option -gqv "@agent-next-done-key")
 wait_key=$(tmux show-option -gqv "@agent-wait-key")
 park_key=$(tmux show-option -gqv "@agent-park-key")
-inbox_key=$(tmux show-option -gqv "@agent-inbox-key")
 
 [ -z "$switcher_key" ] && switcher_key="$default_switcher_key"
 [ -z "$next_done_key" ] && next_done_key="$default_next_done_key"
 [ -z "$wait_key" ] && wait_key="$default_wait_key"
 [ -z "$park_key" ] && park_key="$default_park_key"
-[ -z "$inbox_key" ] && inbox_key="$default_inbox_key"
+
+# Default switcher view: "tree" (hierarchical session/window/pane, default)
+# or "agents" (flat list of every agent pane). Toggle mid-session with ctrl-f.
+switcher_default_mode=$(tmux show-option -gqv "@agent-switcher-default-mode")
+case "$switcher_default_mode" in
+    tree|agents) ;;
+    *) switcher_default_mode="tree" ;;
+esac
 
 # Switcher style: "popup" (fzf only), "sidebar" (sidebar only), or "both" (default)
 switcher_style=$(tmux show-option -gqv "@agent-switcher-style")
@@ -36,15 +39,22 @@ display_method=$(tmux show-option -gqv "@agent-status-display-method")
 sidebar_key=$(tmux show-option -gqv "@agent-sidebar-key")
 [ -z "$sidebar_key" ] && sidebar_key="o"
 
-# Helper to bind the fzf switcher using the configured display method
+# Helper to bind the fzf switcher using the configured display method.
+# Passes the default mode through via TMUX_AGENT_SWITCHER_MODE so the
+# script can pick the right initial view without an extra CLI flag.
 bind_fzf_switcher() {
     local key="$1"
     case "$display_method" in
         "window")
-            tmux bind-key "$key" new-window -n "agent-status" "$CURRENT_DIR/scripts/hook-based-switcher.sh"
+            local launch="env TMUX_AGENT_SWITCHER_MODE=$switcher_default_mode $CURRENT_DIR/scripts/hook-based-switcher.sh"
+            tmux bind-key "$key" new-window -n "agent-status" "$launch"
             ;;
         "popup"|*)
-            tmux bind-key "$key" display-popup -E -w 60 -h 14 -T " Switch Pane " -S fg=colour250 -s fg=colour250 "$CURRENT_DIR/scripts/hook-based-switcher.sh"
+            # Popup geometry varies by mode + preview state, so the popup
+            # loop wrapper owns the display-popup invocation and relaunches
+            # with new dimensions when the inner script requests it.
+            local launch="env TMUX_AGENT_SWITCHER_MODE=$switcher_default_mode $CURRENT_DIR/scripts/switcher-popup-loop.sh"
+            tmux bind-key "$key" run-shell -b "$launch"
             ;;
     esac
 }
@@ -70,12 +80,6 @@ tmux bind-key "$wait_key" run-shell "$CURRENT_DIR/scripts/wait-session.sh"
 
 # Set up keybinding to park a session for later
 tmux bind-key "$park_key" run-shell "$CURRENT_DIR/scripts/park-session.sh"
-
-# Optional inbox popup: flat list of panes that need attention.
-# Enable by setting @agent-inbox-key in tmux.conf, e.g. set -g @agent-inbox-key B
-if [ -n "$inbox_key" ]; then
-    tmux bind-key "$inbox_key" display-popup -E -w 60 -h 14 -T " Agent Inbox " -S fg=colour250 -s fg=colour250 "$CURRENT_DIR/scripts/inbox-switcher.sh"
-fi
 
 # Detect iTerm2 Control Mode (tmux -CC) and skip status polling / daemons
 # to avoid interfering with the control protocol. Keybindings above are fine.

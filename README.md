@@ -23,6 +23,7 @@ Demo video: [`demo/full.mp4`](demo/full.mp4)
 |-------|-------------|--------|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Hook-based via `hooks/better-hook.sh` | Stable |
 | [Codex CLI](https://github.com/openai/codex) | Hook-based via `hooks/codex-hook.sh` | Stable in plugin, hooks still experimental upstream |
+| [Devin CLI](https://docs.devin.ai/cli) | Hook-based via `hooks/devin-hook.sh` (local CLI only) | Stable in plugin |
 | Custom (Aider, Cline, Copilot CLI, etc.) | Status files or collector extensions | Stable |
 
 All agent sessions can run simultaneously across tmux sessions and panes, each tracked independently.
@@ -175,6 +176,75 @@ Restart Codex, then run `/hooks` in the CLI and trust the new command hooks if C
 Codex state is also hook-based. The handler marks the tmux session or pane `working` on `UserPromptSubmit` and `PreToolUse`, resets it to `done` on `Stop`, and seeds resumed sessions on `SessionStart`.
 
 For repo-local tracking while working on this plugin, put the same hook shape in `<repo>/.codex/hooks.json`. Codex loads project-local hooks once the project `.codex/` layer is trusted.
+
+## Devin CLI Setup
+
+This integrates the local [Devin CLI](https://docs.devin.ai/cli) (the `devin` binary that runs in your terminal), not cloud Devin sessions. The Devin CLI uses a [Claude Code-compatible hooks format](https://docs.devin.ai/cli/extensibility/hooks/overview).
+
+Add hooks to `~/.config/devin/config.json`
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/devin-hook.sh SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/devin-hook.sh UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/devin-hook.sh PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/devin-hook.sh PostToolUse"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.config/tmux/plugins/tmux-agent-status/hooks/devin-hook.sh Stop"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Run `/hooks` in the CLI to confirm the command hooks are loaded, and trust them if Devin marks them as pending review.
+
+Devin state is hook-based. The handler marks the session or pane `working` on `UserPromptSubmit`/`PreToolUse`/`PostToolUse`, resets it to `done` on `Stop`, and seeds resumed sessions on `SessionStart`.
+
+Without hooks, the collector still auto-detects a running `devin` process inside a pane (presence only); hooks are required for live `working`/`done` state.
 
 ## Custom Agent Integration
 

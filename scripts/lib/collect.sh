@@ -197,7 +197,7 @@ collect_data() {
 
     # Find agent processes — pgrep globally, walk UP to find owning pane.
     local agent_lines
-    agent_lines=$(pgrep -a "claude|codex" 2>/dev/null || true)
+    agent_lines=$(pgrep -a "claude|codex|devin" 2>/dev/null || true)
     if [[ -n "$agent_lines" ]]; then
         _build_pid_map
         while IFS= read -r apid_line; do
@@ -207,6 +207,7 @@ collect_data() {
             local agent_name="agent"
             [[ "$acmd" == *claude* ]] && agent_name="claude"
             [[ "$acmd" == *codex* ]] && agent_name="codex"
+            [[ "$acmd" == *devin* ]] && agent_name="devin"
 
             local pane_pid
             pane_pid=$(find_ancestor_pane "$apid" "$all_pane_pids") || continue

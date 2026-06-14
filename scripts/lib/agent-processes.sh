@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Shared helpers for finding Claude/Codex processes inside tmux sessions.
+# Shared helpers for finding Claude/Codex/Devin processes inside tmux sessions.
 # Uses an iterative BFS with a pre-built PID map to avoid recursive subshells.
 
 # Global PID→children map and PID→args cache, built once per script invocation.
@@ -28,7 +28,7 @@ _build_agent_pid_map() {
 
 find_matching_descendant_pid() {
     local root_pid="$1"
-    local pattern="${2:-claude|codex}"
+    local pattern="${2:-claude|codex|devin}"
 
     _build_agent_pid_map
 
@@ -56,7 +56,7 @@ find_matching_descendant_pid() {
 
 find_session_agent_pid() {
     local session="$1"
-    local pattern="${2:-claude|codex}"
+    local pattern="${2:-claude|codex|devin}"
 
     _build_agent_pid_map
 
@@ -79,7 +79,7 @@ find_session_agent_pid() {
 
 session_has_agent_process() {
     local session="$1"
-    local pattern="${2:-claude|codex}"
+    local pattern="${2:-claude|codex|devin}"
 
     find_session_agent_pid "$session" "$pattern" >/dev/null 2>&1
 }

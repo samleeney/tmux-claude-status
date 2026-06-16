@@ -95,9 +95,10 @@ selection_tmux_target() {
 }
 
 selection_requires_confirmation() {
-    local scope
-    scope=$(selection_scope "$1" "$2") || return 1
-    [ "$scope" != "pane" ]
+    # Customized: close sessions/windows/panes immediately without a
+    # confirmation prompt. Original behavior asked to confirm for any
+    # non-pane scope: [ "$scope" != "pane" ].
+    return 1
 }
 
 selection_label() {

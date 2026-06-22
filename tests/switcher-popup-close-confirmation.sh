@@ -24,8 +24,11 @@ case "\${1:-}" in
         fi
         exit 1
         ;;
-    confirm-before)
+    run-shell)
         exit 0
+        ;;
+    confirm-before)
+        exit 1
         ;;
     *)
         exit 1
@@ -38,10 +41,16 @@ PATH="$FAKE_BIN:$PATH" \
 HOME="$TMP_DIR/home" \
 "$REPO_DIR/scripts/hook-based-switcher.sh" --popup-close "repo:w0" "P"
 
-if ! grep -Fq "confirm-before -b -p Close window repo:0 (build) and all child panes?" "$LOG_FILE"; then
-    echo "Assertion failed: popup close should request background confirmation for window targets" >&2
+if grep -Fq "confirm-before" "$LOG_FILE"; then
+    echo "Assertion failed: popup close should not request confirmation for window targets" >&2
     cat "$LOG_FILE" >&2
     exit 1
 fi
 
-echo "switcher popup close confirmation regression checks passed"
+if ! grep -Fq "run-shell -b $REPO_DIR/scripts/close-target.sh repo:w0 P" "$LOG_FILE"; then
+    echo "Assertion failed: popup close should dispatch close-target directly" >&2
+    cat "$LOG_FILE" >&2
+    exit 1
+fi
+
+echo "switcher popup close without confirmation regression checks passed"

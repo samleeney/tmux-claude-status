@@ -9,11 +9,18 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 STATE_DIR="$TMP_DIR/state"
 mkdir -p "$STATE_DIR"
 
+session_actions="$("$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --close-fzf-actions "repo" "S")"
 window_actions="$("$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --close-fzf-actions "repo:w0" "P")"
 pane_actions="$("$REPO_DIR/scripts/hook-based-switcher.sh" --state-dir "$STATE_DIR" --close-fzf-actions "repo:%1" "P")"
 
-if [[ "$window_actions" != *"--popup-close repo:w0 P"* ]] || [[ "$window_actions" != *"+abort"* ]]; then
-    echo "Assertion failed: window close actions should abort fzf and route through popup-close" >&2
+if [[ "$session_actions" != *"--close repo S"* ]] || [[ "$session_actions" != *"+reload("* ]]; then
+    echo "Assertion failed: session close actions should close directly and reload the list" >&2
+    echo "$session_actions" >&2
+    exit 1
+fi
+
+if [[ "$window_actions" != *"--close repo:w0 P"* ]] || [[ "$window_actions" != *"+reload("* ]]; then
+    echo "Assertion failed: window close actions should close directly and reload the list" >&2
     echo "$window_actions" >&2
     exit 1
 fi

@@ -213,8 +213,8 @@ Inside the popup switcher:
 - `Enter` switches to the selected session, window, or pane
 - `Tab` expands or collapses the selected session or window
 - `Ctrl-X` closes the selected pane immediately
-- `Ctrl-X` on a window closes that window and all child panes after confirmation
-- `Ctrl-X` on a session closes that session and all child windows and panes after confirmation
+- `Ctrl-X` on a window immediately closes that window and all child panes
+- `Ctrl-X` on a session immediately closes that session and all child windows and panes
 - `Ctrl-P` parks or unparks the selected session, window, or pane
 - `Ctrl-W` opens wait mode for the selected target, or cancels an existing wait
 - `Ctrl-R` resets tracked state

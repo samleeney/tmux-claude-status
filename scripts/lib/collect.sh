@@ -472,92 +472,94 @@ collect_data() {
     }
 
     # ── INBOX ────────────────────────────────────────────────────
-    local inbox=()
-    for sname in "${all_sessions[@]}"; do
-        session_is_fully_parked "$sname" && continue
-        if [[ -n "${sess_agents[$sname]:-}" ]]; then
-            _get_agent_arr "$sname"
-            local arr=("${_agent_result[@]}")
-            if (( ${#arr[@]} <= 1 )); then
-                local ap="${arr[0]:-}"
-                local pst="${ap#*:}"; pst="${pst#*:}"
-                [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}||${sname}|done")
+    if [[ "$SIDEBAR_MODE" != "agents" ]]; then
+        local inbox=()
+        for sname in "${all_sessions[@]}"; do
+            session_is_fully_parked "$sname" && continue
+            if [[ -n "${sess_agents[$sname]:-}" ]]; then
+                _get_agent_arr "$sname"
+                local arr=("${_agent_result[@]}")
+                if (( ${#arr[@]} <= 1 )); then
+                    local ap="${arr[0]:-}"
+                    local pst="${ap#*:}"; pst="${pst#*:}"
+                    [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}||${sname}|done")
+                    continue
+                fi
+
+                local -A _ib_win=()
+                for ap in "${arr[@]}"; do
+                    local pid="${ap%%:*}"
+                    local wi="${pane_to_window[$pid]:-0}"
+                    _ib_win[$wi]+="$ap "
+                done
+
+                if (( ${#_ib_win[@]} == 1 )); then
+                    local only_wi=""
+                    for only_wi in "${!_ib_win[@]}"; do
+                        break
+                    done
+
+                    local ai=0
+                    local pid=""
+                    while IFS= read -r pid; do
+                        [ -n "$pid" ] || continue
+
+                        local ap=""
+                        local candidate=""
+                        for candidate in ${_ib_win[$only_wi]}; do
+                            [ "${candidate%%:*}" = "$pid" ] || continue
+                            ap="$candidate"
+                            break
+                        done
+                        [ -n "$ap" ] || continue
+
+                        ((ai++))
+                        local r="${ap#*:}"
+                        local aname="${r%%:*}"
+                        local pst="${r#*:}"
+                        [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}|${pid}|${sname} › ${aname} #${ai}|done")
+                    done < <(tmux list-panes -t "${sname}:${only_wi}" -F "#{pane_id}" 2>/dev/null)
+                else
+                    local wi=""
+                    while IFS= read -r wi; do
+                        [ -n "${_ib_win[$wi]:-}" ] || continue
+
+                        local wname="${window_names[${sname}:${wi}]:-window-$wi}"
+                        local any_done=0
+                        local wap=""
+                        for wap in ${_ib_win[$wi]}; do
+                            local ws="${wap#*:}"
+                            ws="${ws#*:}"
+                            [[ "$ws" == "done" || "$ws" == "ask" ]] && any_done=1
+                        done
+                        (( any_done )) && inbox+=("I|${sname}|w${wi}|${sname} › ${wname}|done")
+                    done < <(tmux list-windows -t "$sname" -F "#{window_index}" 2>/dev/null)
+                fi
+
                 continue
             fi
 
-            local -A _ib_win=()
-            for ap in "${arr[@]}"; do
-                local pid="${ap%%:*}"
-                local wi="${pane_to_window[$pid]:-0}"
-                _ib_win[$wi]+="$ap "
-            done
-
-            if (( ${#_ib_win[@]} == 1 )); then
-                local only_wi=""
-                for only_wi in "${!_ib_win[@]}"; do
-                    break
-                done
-
-                local ai=0
-                local pid=""
-                while IFS= read -r pid; do
-                    [ -n "$pid" ] || continue
-
-                    local ap=""
-                    local candidate=""
-                    for candidate in ${_ib_win[$only_wi]}; do
-                        [ "${candidate%%:*}" = "$pid" ] || continue
-                        ap="$candidate"
-                        break
-                    done
-                    [ -n "$ap" ] || continue
-
-                    ((ai++))
-                    local r="${ap#*:}"
-                    local aname="${r%%:*}"
-                    local pst="${r#*:}"
-                    [[ "$pst" == "done" || "$pst" == "ask" ]] && inbox+=("I|${sname}|${pid}|${sname} › ${aname} #${ai}|done")
-                done < <(tmux list-panes -t "${sname}:${only_wi}" -F "#{pane_id}" 2>/dev/null)
-            else
-                local wi=""
-                while IFS= read -r wi; do
-                    [ -n "${_ib_win[$wi]:-}" ] || continue
-
-                    local wname="${window_names[${sname}:${wi}]:-window-$wi}"
-                    local any_done=0
-                    local wap=""
-                    for wap in ${_ib_win[$wi]}; do
-                        local ws="${wap#*:}"
-                        ws="${ws#*:}"
-                        [[ "$ws" == "done" || "$ws" == "ask" ]] && any_done=1
-                    done
-                    (( any_done )) && inbox+=("I|${sname}|w${wi}|${sname} › ${wname}|done")
-                done < <(tmux list-windows -t "$sname" -F "#{window_index}" 2>/dev/null)
-            fi
-
-            continue
-        fi
-
-        [[ -n "${worktree_parent[$sname]:-}" ]] && continue
-        local st="${eff_state[$sname]}"
-        [[ "$st" == "done" || "$st" == "ask" ]] && inbox+=("I|${sname}||${sname}|done")
-    done
-
-    if (( ${#inbox[@]} > 0 )); then
-        ENTRIES+=("G|INBOX|green")
-        for entry in "${inbox[@]}"; do
-            ENTRIES+=("$entry")
-            local r="${entry#I|}"
-            local sname="${r%%|*}"; r="${r#*|}"
-            local token="${r%%|*}"
-            if [[ -n "$token" ]]; then
-                SEL_NAMES+=("${sname}:${token}")
-                SEL_TYPES+=("P")
-            else
-                SEL_NAMES+=("$sname")
-                SEL_TYPES+=("S")
-            fi
+            [[ -n "${worktree_parent[$sname]:-}" ]] && continue
+            local st="${eff_state[$sname]}"
+            [[ "$st" == "done" || "$st" == "ask" ]] && inbox+=("I|${sname}||${sname}|done")
         done
+
+        if (( ${#inbox[@]} > 0 )); then
+            ENTRIES+=("G|INBOX|green")
+            for entry in "${inbox[@]}"; do
+                ENTRIES+=("$entry")
+                local r="${entry#I|}"
+                local sname="${r%%|*}"; r="${r#*|}"
+                local token="${r%%|*}"
+                if [[ -n "$token" ]]; then
+                    SEL_NAMES+=("${sname}:${token}")
+                    SEL_TYPES+=("P")
+                else
+                    SEL_NAMES+=("$sname")
+                    SEL_TYPES+=("S")
+                fi
+            done
+        fi
     fi
 
     # ── SESSIONS ─────────────────────────────────────────────────

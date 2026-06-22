@@ -594,7 +594,7 @@ case "${SWITCHER_COMMAND:-}" in
         ;;
     --reset-rows)
         perform_full_reset
-        get_switcher_rows
+        emit_rows_for_mode
         exit 0
         ;;
 esac

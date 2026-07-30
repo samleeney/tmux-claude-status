@@ -545,11 +545,6 @@ render() {
                 [[ "$state" == "working" ]] && has_working_spinner=1
             fi
 
-            local max_n=$((LW - 5 - icon_vlen))
-            (( max_n < 4 )) && max_n=4
-            local dname="$name"
-            (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
-
             local suffix=""
             [[ -n "$extra" ]] && suffix=" (${extra})"
             [[ -n "$ssh" ]] && suffix+=" [ssh]"
@@ -557,6 +552,11 @@ render() {
             (( is_cur )) && active_tag=" ${DIM}ACTIVE${RST}"
             local tag_vlen=0
             (( is_cur )) && tag_vlen=7
+
+            local max_n=$((LW - 5 - icon_vlen - ${#suffix} - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dname="$name"
+            (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
 
             local vlen=$(( ${#dname} + ${#suffix} + tag_vlen ))
             local pad
@@ -609,16 +609,17 @@ render() {
             fi
 
             local tree="├"; [[ "$is_last" == "1" ]] && tree="└"
-            local max_n=$((LW - 9 - icon_vlen))
-            (( max_n < 4 )) && max_n=4
-            local dname="$name"
-            (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
 
             local suffix=""
             [[ -n "$extra" ]] && suffix=" (${extra})"
             local active_tag=""
             local tag_vlen=0
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
+
+            local max_n=$((LW - 9 - icon_vlen - ${#suffix} - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dname="$name"
+            (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
 
             local vlen=$(( ${#dname} + ${#suffix} + tag_vlen ))
             local pad
@@ -675,14 +676,15 @@ render() {
             fi
 
             local _icon _ic; _set_icon_color "$istatus"
-            local max_n=$((LW - 6))
-            (( max_n < 4 )) && max_n=4
-            local dlabel="$label"
-            (( ${#dlabel} > max_n )) && dlabel="${dlabel:0:$((max_n-1))}…"
 
             local active_tag=""
             local tag_vlen=0
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
+
+            local max_n=$((LW - 6 - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dlabel="$label"
+            (( ${#dlabel} > max_n )) && dlabel="${dlabel:0:$((max_n-1))}…"
 
             local vlen=$(( ${#dlabel} + tag_vlen ))
             local pad
@@ -725,7 +727,13 @@ render() {
             local active_tag=""
             local tag_vlen=0
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
-            local vlen=$(( ${#agent} + tag_vlen ))
+
+            local max_n=$((LW - 8 - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dagent="$agent"
+            (( ${#dagent} > max_n )) && dagent="${dagent:0:$((max_n-1))}…"
+
+            local vlen=$(( ${#dagent} + tag_vlen ))
             local pad
             local _spinner_bg="none"
             (( is_sel )) && _spinner_bg="sel"
@@ -735,19 +743,19 @@ render() {
                 pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
                 [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
-                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
+                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${DIM}${dagent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
                 [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
-                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
+                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${DIM}${dagent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
-                pad=$((LW - ${#agent} - 8))
+                pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
-                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + ${#agent} + pad + 1))" "$_spinner_bg"
-                buf+="    ${DIM}${tree} ${agent}${RST}"
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
+                buf+="    ${DIM}${tree} ${dagent}${RST}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             fi
 
@@ -767,7 +775,13 @@ render() {
             local active_tag=""
             local tag_vlen=0
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
-            local vlen=$(( ${#agent} + tag_vlen ))
+
+            local max_n=$((LW - 10 - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dagent="$agent"
+            (( ${#dagent} > max_n )) && dagent="${dagent:0:$((max_n-1))}…"
+
+            local vlen=$(( ${#dagent} + tag_vlen ))
             local pad
             local _spinner_bg="none"
             (( is_sel )) && _spinner_bg="sel"
@@ -777,19 +791,19 @@ render() {
                 pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
                 [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + vlen + pad + 1))" "$_spinner_bg"
-                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
+                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${dagent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
                 [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + vlen + pad + 1))" "$_spinner_bg"
-                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
+                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${dagent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
-                pad=$((LW - ${#agent} - 10))
+                pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
-                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + ${#agent} + pad + 1))" "$_spinner_bg"
-                buf+="    ${DIM}${vert} ${tree} ${agent}${RST}"
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + vlen + pad + 1))" "$_spinner_bg"
+                buf+="    ${DIM}${vert} ${tree} ${dagent}${RST}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             fi
         fi

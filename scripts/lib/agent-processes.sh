@@ -83,3 +83,25 @@ session_has_agent_process() {
 
     find_session_agent_pid "$session" "$pattern" >/dev/null 2>&1
 }
+
+# Best-effort agent type for a session, from the command line of the first
+# agent process found in it. Prints "agent" when nothing more specific is
+# known.
+find_session_agent_name() {
+    local session="$1"
+    local apid
+
+    apid=$(find_session_agent_pid "$session" 2>/dev/null)
+    if [ -n "$apid" ]; then
+        # The pid lookup above runs in a subshell, so make sure the args
+        # cache exists in this shell before reading it.
+        _build_agent_pid_map
+        local args="${_AP_ARGS[$apid]:-}"
+        case "$args" in
+            *claude*) echo "claude"; return ;;
+            *codex*)  echo "codex"; return ;;
+            *devin*)  echo "devin"; return ;;
+        esac
+    fi
+    echo "agent"
+}

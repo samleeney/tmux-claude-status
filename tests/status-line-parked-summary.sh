@@ -67,6 +67,7 @@ assert_eq() {
 run_status_line() {
     PATH="$FAKE_BIN:$PATH" \
     HOME="$TEST_HOME" \
+    TMUX_AGENT_STATUS_FRAME=0 \
     "$REPO_DIR/scripts/status-line.sh"
 }
 
@@ -75,7 +76,7 @@ echo "parked" > "$STATUS_DIR/parked-session.status"
 echo "done" > "$STATUS_DIR/done-session.status"
 
 summary_output="$(run_status_line)"
-assert_eq "#[fg=green,bold]✓ All agents ready#[default]" "$summary_output" "parked sessions should be excluded from the status-bar summary"
+assert_eq "#[fg=green]●#[default]" "$summary_output" "parked sessions should be excluded from the status-bar summary"
 
 rm -f "$STATUS_DIR/done-session.status"
 parked_only_output="$(run_status_line)"

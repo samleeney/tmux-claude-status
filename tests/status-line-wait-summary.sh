@@ -60,6 +60,7 @@ assert_eq() {
 run_status_line() {
     PATH="$FAKE_BIN:$PATH" \
     HOME="$TEST_HOME" \
+    TMUX_AGENT_STATUS_FRAME="${1:-0}" \
     "$REPO_DIR/scripts/status-line.sh"
 }
 
@@ -69,21 +70,23 @@ echo "done" > "$STATUS_DIR/done-session.status"
 echo "wait" > "$STATUS_DIR/done-session-remote.status"
 echo $(( $(date +%s) + 600 )) > "$WAIT_DIR/wait-session.wait"
 
-summary_output="$(run_status_line)"
-assert_eq "#[fg=yellow,bold]⚡ agent working#[default] #[fg=cyan,bold]⏸ 1 waiting#[default] #[fg=green]✓ 1 done#[default]" "$summary_output" "wait sessions should render as a separate status-bar segment"
+summary_output="$(run_status_line 0)"
+assert_eq "#[fg=yellow,bold]●#[default] #[fg=cyan]●#[default] #[fg=green]●#[default]" "$summary_output" "each session should render one glyph coloured by status"
+summary_frame_output="$(run_status_line 1)"
+assert_eq "#[fg=yellow,bold]○#[default] #[fg=cyan]●#[default] #[fg=green]●#[default]" "$summary_frame_output" "frame 1 should flip only the working glyph"
 if [ -f "$STATUS_DIR/done-session-remote.status" ]; then
     echo "Assertion failed: stale remote cache for a non-SSH session should be removed" >&2
     exit 1
 fi
 
 rm -f "$STATUS_DIR/working-session.status" "$STATUS_DIR/done-session.status"
-wait_only_output="$(run_status_line)"
-assert_eq "#[fg=cyan,bold]⏸ 1 waiting#[default]" "$wait_only_output" "wait-only summaries should not be reported as working"
+wait_only_output="$(run_status_line 0)"
+assert_eq "#[fg=cyan]●#[default]" "$wait_only_output" "wait-only summaries should not be reported as working"
 
 rm -f "$WAIT_DIR/wait-session.wait"
-stale_wait_output="$(run_status_line)"
+stale_wait_output="$(run_status_line 0)"
 stale_wait_status="$(cat "$STATUS_DIR/wait-session.status")"
 assert_eq "done" "$stale_wait_status" "local wait without a timer should be normalized back to done"
-assert_eq "#[fg=green,bold]✓ All agents ready#[default]" "$stale_wait_output" "stale local wait without a timer should render as done"
+assert_eq "#[fg=green]●#[default]" "$stale_wait_output" "stale local wait without a timer should render as done"
 
 echo "status-line wait summary regression checks passed"

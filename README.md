@@ -270,11 +270,28 @@ Default mode is sidebar-first:
 | `prefix + W` | Put the current session or pane into timed wait mode |
 | `prefix + p` | Park the current session or pane for later |
 
-The status bar shows live activity:
+The status bar shows one glyph per agent. The glyph identifies the agent,
+the colour identifies its status:
 
-- `⚡ agent working`
-- `⚡ 3 working ⏸ 1 waiting ✓ 2 done`
-- `✓ All agents ready`
+| Agent | Glyph |
+|-------|-------|
+| Claude | `✳` |
+| Codex | `⬢` |
+| Devin | `◆` |
+| Other | `●` |
+
+| Status | Colour |
+|--------|--------|
+| working | yellow, pulsing (`✳`/`✻`, `⬢`/`⬡`, …) |
+| waiting | cyan |
+| ask | magenta |
+| done | green |
+
+For example two Claude agents working alongside a finished Codex agent
+renders as a yellow `✳ ✳` next to a green `⬢`, with the working glyphs
+flipping frames every second. Glyphs and colours are defined in
+[`scripts/lib/status-summary.sh`](scripts/lib/status-summary.sh) if you want
+different ones.
 
 Parked sessions stay visible in the sidebar and switcher, but are excluded from the status-line summary.
 

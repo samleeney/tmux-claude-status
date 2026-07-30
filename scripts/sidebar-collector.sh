@@ -45,6 +45,7 @@ SUMMARY_WAITING=0
 SUMMARY_DONE=0
 SUMMARY_TOTAL=0
 SUMMARY_HAS_WORKING=0
+SUMMARY_AGENTS=()
 
 _tab=$'\t'
 
@@ -80,7 +81,8 @@ publish_status_summary() {
         "$SUMMARY_WORKING" \
         "$SUMMARY_WAITING" \
         "$SUMMARY_DONE" \
-        "$SUMMARY_TOTAL"
+        "$SUMMARY_TOTAL" \
+        "${SUMMARY_AGENTS[@]}"
 
     if (( ! RUN_ONCE )) && [ -n "$prev_done" ] && [ "$SUMMARY_DONE" -gt "$prev_done" ]; then
         "$SCRIPT_DIR/play-sound.sh" &

@@ -38,7 +38,11 @@ handle_animation_signal() {
     (( _HAS_WORKING )) && ANIMATE_TICK=1
 }
 
-trap cleanup EXIT INT TERM HUP
+# cleanup runs via the EXIT trap; the signal traps must actually exit —
+# a bare handler would swallow the signal (tmux sends HUP when the pane
+# closes) and leave an orphaned sidebar looping forever.
+trap cleanup EXIT
+trap 'exit 0' INT TERM HUP
 trap handle_refresh_signal USR1
 trap handle_animation_signal USR2
 RESIZED=0
@@ -1038,9 +1042,27 @@ action_park() {
 NEEDS_COLLECT=1
 NEEDS_RENDER=1
 ANIMATE_TICK=0
+_LAST_LIVENESS_TS=0
+
 while true; do
     # Exit if our pane/TTY is gone (prevents orphaned processes).
     [[ ! -t 0 ]] && exit 0
+
+    # tmux does not reliably HUP pane processes when a pane is destroyed
+    # (and a dead pty never returns EOF on macOS — reads just keep timing
+    # out), so poll our own liveness: pane mode checks the pane still
+    # exists, preview mode checks we haven't been orphaned to PID 1.
+    printf -v _now_ts '%(%s)T' -1
+    if (( _now_ts - _LAST_LIVENESS_TS >= 5 )); then
+        _LAST_LIVENESS_TS=$_now_ts
+        if [ -n "${SELF_PANE:-}" ]; then
+            # list-panes + grep, not display-message: display-message still
+            # "resolves" recently destroyed pane ids.
+            tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qFx "$SELF_PANE" || exit 0
+        elif [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" = "1" ]; then
+            exit 0
+        fi
+    fi
 
     if (( NEEDS_COLLECT )); then
         prev_cache_mtime="$_LAST_STATUS_MTIME"
@@ -1217,5 +1239,10 @@ while true; do
                 q)   exit 0 ;;
             esac
         fi
+    else
+        # Timeouts and trap interruptions return >128; anything else is
+        # EOF from a dead pty — exit instead of busy-looping on it.
+        read_rc=$?
+        (( read_rc > 128 )) || exit 0
     fi
 done

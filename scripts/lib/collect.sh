@@ -11,7 +11,7 @@
 #
 # Populates: ENTRIES[], SEL_NAMES[], SEL_TYPES[], PANE_COUNTS[], SESS_START,
 #            SUMMARY_WORKING, SUMMARY_WAITING, SUMMARY_DONE, SUMMARY_TOTAL,
-#            SUMMARY_HAS_WORKING
+#            SUMMARY_HAS_WORKING, SUMMARY_AGENTS[]
 # Persists across calls: LIVE_PANES[]
 # Sets _COLLECT_CHANGED=1 when data was rebuilt, 0 when skipped (no changes).
 
@@ -98,6 +98,7 @@ collect_data() {
     SUMMARY_DONE=0
     SUMMARY_TOTAL=0
     SUMMARY_HAS_WORKING=0
+    SUMMARY_AGENTS=()
 
     local now
     printf -v now '%(%s)T' -1
@@ -212,19 +213,15 @@ collect_data() {
         KNOWN_AGENTS["${owner}:${pid_id}"]="$agent_name"
     done
 
-    # Find agent processes — pgrep globally, walk UP to find owning pane.
+    # Find agent processes — scan ps globally, walk UP to find owning pane.
+    # (ps instead of pgrep: macOS pgrep cannot print the command line, which
+    # we need to tell claude/codex/devin apart.)
     local agent_lines
-    agent_lines=$(pgrep -a "claude|codex|devin" 2>/dev/null || true)
+    agent_lines=$(scan_agent_processes)
     if [[ -n "$agent_lines" ]]; then
         _build_pid_map
-        while IFS= read -r apid_line; do
-            [ -z "$apid_line" ] && continue
-            local apid="${apid_line%% *}"
-            local acmd="${apid_line#* }"
-            local agent_name="agent"
-            [[ "$acmd" == *claude* ]] && agent_name="claude"
-            [[ "$acmd" == *codex* ]] && agent_name="codex"
-            [[ "$acmd" == *devin* ]] && agent_name="devin"
+        while read -r agent_name apid acmd; do
+            [ -z "$apid" ] && continue
 
             local pane_pid
             pane_pid=$(find_ancestor_pane "$apid" "$all_pane_pids") || continue
@@ -232,7 +229,13 @@ collect_data() {
             [ -z "$owner" ] && continue
             local pid_id="${pane_to_id[$pane_pid]:-}"
 
-            KNOWN_AGENTS["${owner}:${pid_id}"]="$agent_name"
+            # Hook-written .agent names are authoritative; process detection
+            # fills gaps and never downgrades a specific name to "agent".
+            local akey="${owner}:${pid_id}"
+            local known="${KNOWN_AGENTS[$akey]:-}"
+            if [ -z "$known" ] || { [ "$known" = "agent" ] && [ "$agent_name" != "agent" ]; }; then
+                KNOWN_AGENTS[$akey]="$agent_name"
+            fi
         done <<< "$agent_lines"
     fi
 
@@ -298,6 +301,46 @@ collect_data() {
                 ;;
         esac
     done
+
+    # ── 5a'. Per-agent status-line list ─────────────────────────
+    # One "name:status" spec per agent, ordered by session name then pane
+    # id so glyph positions in the status bar stay stable across refreshes.
+    # Sessions with detected agent panes contribute one spec per pane;
+    # sessions tracked only at session level (e.g. SSH remotes) contribute
+    # a single generic spec.
+    SUMMARY_AGENTS=()
+    while IFS= read -r sname; do
+        [ -z "$sname" ] && continue
+        local sstate="${sess_state[$sname]}"
+        case "$sstate" in
+            working|wait|done|ask) ;;
+            *) continue ;;
+        esac
+
+        if [ -z "${sess_agents[$sname]:-}" ]; then
+            SUMMARY_AGENTS+=("agent:${sstate}")
+            continue
+        fi
+
+        local ap
+        while IFS= read -r ap; do
+            [ -z "$ap" ] && continue
+            local aname="${ap#*:}"
+            aname="${aname%%:*}"
+            local astatus="${ap#*:}"
+            astatus="${astatus#*:}"
+            # A session-wide wait snoozes every agent in it. Parked panes
+            # stay hidden (matching collect_status_agents in status-line.sh).
+            if [ "$sstate" = "wait" ] && [ "$astatus" != "parked" ]; then
+                astatus="wait"
+            fi
+            case "$astatus" in
+                working|wait|done|ask)
+                    SUMMARY_AGENTS+=("${aname}:${astatus}")
+                    ;;
+            esac
+        done < <(printf '%s\n' ${sess_agents[$sname]} | sort)
+    done < <(printf '%s\n' "${!sess_state[@]}" | sort)
 
     # ── 5b. Compute per-session pane counts ─────────────────────
     PANE_COUNTS=()

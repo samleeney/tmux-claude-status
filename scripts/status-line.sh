@@ -21,7 +21,14 @@ if [ -f "$COLLECTOR_PID_FILE" ]; then
 fi
 
 if (( collector_running )) && [ -f "$STATUS_LINE_CACHE_FILE" ]; then
-    cat "$STATUS_LINE_CACHE_FILE"
+    # The cache holds one line per animation frame; older caches hold a
+    # single pre-rendered line.
+    mapfile -t cache_frames < "$STATUS_LINE_CACHE_FILE"
+    if (( ${#cache_frames[@]} > 1 )); then
+        printf '%s\n' "${cache_frames[$(status_summary_frame)]}"
+    else
+        printf '%s\n' "${cache_frames[0]:-}"
+    fi
     exit 0
 fi
 
@@ -176,7 +183,71 @@ count_agent_status() {
     echo "$working:$waiting:$done:$total_agents"
 }
 
-# Get current status
+# Build the per-agent "name:status" list shown in the status bar, ordered
+# by session then pane id. Hook-tracked panes contribute one spec each;
+# sessions tracked only at session level contribute a single spec typed via
+# process detection.
+collect_status_agents() {
+    local session
+    while IFS= read -r session; do
+        [ -z "$session" ] && continue
+        session_is_fully_parked "$session" && continue
+
+        local detected_name=""
+        local emitted=0
+
+        # A session-wide wait snoozes every agent in the session.
+        local session_wait=0
+        if [ -f "$WAIT_DIR/${session}.wait" ] \
+            && [ "$(cat "$STATUS_DIR/${session}.status" 2>/dev/null)" = "wait" ]; then
+            session_wait=1
+        fi
+
+        local live_panes
+        live_panes=$'\n'"$(tmux list-panes -t "$session" -F '#{pane_id}' 2>/dev/null)"$'\n'
+
+        local pane_file
+        for pane_file in "$PANE_DIR/${session}_"*.status; do
+            [ -f "$pane_file" ] || continue
+            local pane_id
+            pane_id=$(basename "$pane_file" .status)
+            pane_id="${pane_id#${session}_}"
+            [[ "$live_panes" == *$'\n'"$pane_id"$'\n'* ]] || continue
+
+            local astatus
+            astatus=$(get_pane_status "$session" "$pane_id")
+            (( session_wait )) && [ "$astatus" != "parked" ] && astatus="wait"
+            case "$astatus" in
+                working|wait|done|ask) ;;
+                *) continue ;;
+            esac
+
+            local aname=""
+            if [ -f "$PANE_DIR/${session}_${pane_id}.agent" ]; then
+                aname=$(cat "$PANE_DIR/${session}_${pane_id}.agent" 2>/dev/null)
+            fi
+            if [ -z "$aname" ]; then
+                [ -z "$detected_name" ] && detected_name=$(find_session_agent_name "$session")
+                aname="$detected_name"
+            fi
+            printf '%s:%s\n' "$aname" "$astatus"
+            emitted=1
+        done
+
+        (( emitted )) && continue
+
+        local status
+        status=$(get_agent_status "$session")
+        case "$status" in
+            working|wait|done|ask) ;;
+            *) continue ;;
+        esac
+        [ -z "$detected_name" ] && detected_name=$(find_session_agent_name "$session")
+        printf '%s:%s\n' "$detected_name" "$status"
+    done < <(tmux list-sessions -F "#{session_name}" 2>/dev/null)
+}
+
+# Get current status counts (used for the done-notification diff below)
 IFS=':' read -r working waiting done total_agents <<< "$(count_agent_status)"
 
 # Load previous status. Older versions stored only the working count; skip
@@ -197,4 +268,5 @@ if [ -n "$prev_done" ] && [ "$done" -gt "$prev_done" ]; then
     "$SCRIPT_DIR/play-sound.sh" &
 fi
 
-render_status_summary "$working" "$waiting" "$done" "$total_agents"
+mapfile -t agent_specs < <(collect_status_agents)
+render_status_summary "$(status_summary_frame)" "${agent_specs[@]}"

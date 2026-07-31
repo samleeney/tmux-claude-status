@@ -38,7 +38,11 @@ handle_animation_signal() {
     (( _HAS_WORKING )) && ANIMATE_TICK=1
 }
 
-trap cleanup EXIT INT TERM HUP
+# cleanup runs via the EXIT trap; the signal traps must actually exit —
+# a bare handler would swallow the signal (tmux sends HUP when the pane
+# closes) and leave an orphaned sidebar looping forever.
+trap cleanup EXIT
+trap 'exit 0' INT TERM HUP
 trap handle_refresh_signal USR1
 trap handle_animation_signal USR2
 RESIZED=0
@@ -541,11 +545,6 @@ render() {
                 [[ "$state" == "working" ]] && has_working_spinner=1
             fi
 
-            local max_n=$((LW - 5 - icon_vlen))
-            (( max_n < 4 )) && max_n=4
-            local dname="$name"
-            (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
-
             local suffix=""
             [[ -n "$extra" ]] && suffix=" (${extra})"
             [[ -n "$ssh" ]] && suffix+=" [ssh]"
@@ -553,6 +552,11 @@ render() {
             (( is_cur )) && active_tag=" ${DIM}ACTIVE${RST}"
             local tag_vlen=0
             (( is_cur )) && tag_vlen=7
+
+            local max_n=$((LW - 5 - icon_vlen - ${#suffix} - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dname="$name"
+            (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
 
             local vlen=$(( ${#dname} + ${#suffix} + tag_vlen ))
             local pad
@@ -605,16 +609,17 @@ render() {
             fi
 
             local tree="├"; [[ "$is_last" == "1" ]] && tree="└"
-            local max_n=$((LW - 9 - icon_vlen))
-            (( max_n < 4 )) && max_n=4
-            local dname="$name"
-            (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
 
             local suffix=""
             [[ -n "$extra" ]] && suffix=" (${extra})"
             local active_tag=""
             local tag_vlen=0
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
+
+            local max_n=$((LW - 9 - icon_vlen - ${#suffix} - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dname="$name"
+            (( ${#dname} > max_n )) && dname="${dname:0:$((max_n-1))}…"
 
             local vlen=$(( ${#dname} + ${#suffix} + tag_vlen ))
             local pad
@@ -671,14 +676,15 @@ render() {
             fi
 
             local _icon _ic; _set_icon_color "$istatus"
-            local max_n=$((LW - 6))
-            (( max_n < 4 )) && max_n=4
-            local dlabel="$label"
-            (( ${#dlabel} > max_n )) && dlabel="${dlabel:0:$((max_n-1))}…"
 
             local active_tag=""
             local tag_vlen=0
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
+
+            local max_n=$((LW - 6 - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dlabel="$label"
+            (( ${#dlabel} > max_n )) && dlabel="${dlabel:0:$((max_n-1))}…"
 
             local vlen=$(( ${#dlabel} + tag_vlen ))
             local pad
@@ -721,7 +727,13 @@ render() {
             local active_tag=""
             local tag_vlen=0
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
-            local vlen=$(( ${#agent} + tag_vlen ))
+
+            local max_n=$((LW - 8 - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dagent="$agent"
+            (( ${#dagent} > max_n )) && dagent="${dagent:0:$((max_n-1))}…"
+
+            local vlen=$(( ${#dagent} + tag_vlen ))
             local pad
             local _spinner_bg="none"
             (( is_sel )) && _spinner_bg="sel"
@@ -731,19 +743,19 @@ render() {
                 pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
                 [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
-                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
+                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${tree}${RST}${SEL_BG} ${DIM}${dagent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
                 [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
-                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
+                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${tree}${RST}${CUR_BG} ${DIM}${dagent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
-                pad=$((LW - ${#agent} - 8))
+                pad=$((LW - vlen - 8))
                 (( pad < 0 )) && pad=0
-                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + ${#agent} + pad + 1))" "$_spinner_bg"
-                buf+="    ${DIM}${tree} ${agent}${RST}"
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((6 + vlen + pad + 1))" "$_spinner_bg"
+                buf+="    ${DIM}${tree} ${dagent}${RST}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             fi
 
@@ -763,7 +775,13 @@ render() {
             local active_tag=""
             local tag_vlen=0
             (( is_cur )) && { active_tag=" ${DIM}ACTIVE${RST}"; tag_vlen=7; }
-            local vlen=$(( ${#agent} + tag_vlen ))
+
+            local max_n=$((LW - 10 - tag_vlen))
+            (( max_n < 4 )) && max_n=4
+            local dagent="$agent"
+            (( ${#dagent} > max_n )) && dagent="${dagent:0:$((max_n-1))}…"
+
+            local vlen=$(( ${#dagent} + tag_vlen ))
             local pad
             local _spinner_bg="none"
             (( is_sel )) && _spinner_bg="sel"
@@ -773,19 +791,19 @@ render() {
                 pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
                 [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + vlen + pad + 1))" "$_spinner_bg"
-                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${agent}${RST}${active_tag}${SEL_BG}"
+                buf+="${SEL_BG}  ${BOLD}▸${RST}${SEL_BG} ${DIM}${vert} ${tree}${RST}${SEL_BG} ${DIM}${dagent}${RST}${active_tag}${SEL_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             elif (( is_cur )); then
                 pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
                 [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + vlen + pad + 1))" "$_spinner_bg"
-                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${agent}${RST}${active_tag}${CUR_BG}"
+                buf+="${CUR_BG}  ${ACC_GRN}▌${RST}${CUR_BG} ${DIM}${vert} ${tree}${RST}${CUR_BG} ${DIM}${dagent}${RST}${active_tag}${CUR_BG}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             else
-                pad=$((LW - ${#agent} - 10))
+                pad=$((LW - vlen - 10))
                 (( pad < 0 )) && pad=0
-                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + ${#agent} + pad + 1))" "$_spinner_bg"
-                buf+="    ${DIM}${vert} ${tree} ${agent}${RST}"
+                [[ "$pstatus" == "working" ]] && _queue_spinner_target "$((line + 1))" "$((8 + vlen + pad + 1))" "$_spinner_bg"
+                buf+="    ${DIM}${vert} ${tree} ${dagent}${RST}"
                 buf+="$(printf '%*s' "$pad" '')${_ic}${_icon}${RST}\033[K\n"
             fi
         fi
@@ -1038,9 +1056,27 @@ action_park() {
 NEEDS_COLLECT=1
 NEEDS_RENDER=1
 ANIMATE_TICK=0
+_LAST_LIVENESS_TS=0
+
 while true; do
     # Exit if our pane/TTY is gone (prevents orphaned processes).
     [[ ! -t 0 ]] && exit 0
+
+    # tmux does not reliably HUP pane processes when a pane is destroyed
+    # (and a dead pty never returns EOF on macOS — reads just keep timing
+    # out), so poll our own liveness: pane mode checks the pane still
+    # exists, preview mode checks we haven't been orphaned to PID 1.
+    printf -v _now_ts '%(%s)T' -1
+    if (( _now_ts - _LAST_LIVENESS_TS >= 5 )); then
+        _LAST_LIVENESS_TS=$_now_ts
+        if [ -n "${SELF_PANE:-}" ]; then
+            # list-panes + grep, not display-message: display-message still
+            # "resolves" recently destroyed pane ids.
+            tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qFx "$SELF_PANE" || exit 0
+        elif [ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" = "1" ]; then
+            exit 0
+        fi
+    fi
 
     if (( NEEDS_COLLECT )); then
         prev_cache_mtime="$_LAST_STATUS_MTIME"
@@ -1217,5 +1253,10 @@ while true; do
                 q)   exit 0 ;;
             esac
         fi
+    else
+        # Timeouts and trap interruptions return >128; anything else is
+        # EOF from a dead pty — exit instead of busy-looping on it.
+        read_rc=$?
+        (( read_rc > 128 )) || exit 0
     fi
 done

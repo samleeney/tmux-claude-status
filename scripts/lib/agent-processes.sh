@@ -83,3 +83,46 @@ session_has_agent_process() {
 
     find_session_agent_pid "$session" "$pattern" >/dev/null 2>&1
 }
+
+# Scan all processes for agent commands, printing "name pid args" per match.
+# Matches the executable basename, or the first argument's basename when the
+# executable is an interpreter (npm installs run Claude as
+# "node /path/to/bin/claude"). Deliberately narrower than matching the whole
+# command line: "man claude" or "tail -f logs/claude" must not register a
+# pane as an agent.
+scan_agent_processes() {
+    ps -eo pid=,args= 2>/dev/null | awk '
+        function base(s) { sub(".*/", "", s); return s }
+        {
+            name = base($2)
+            if (name !~ /^(claude|codex|devin)$/) {
+                if (name !~ /^(node|bun|deno|python[0-9.]*)$/) next
+                name = base($3)
+                if (name !~ /^(claude|codex|devin)$/) next
+            }
+            print name, $0
+        }
+    '
+}
+
+# Best-effort agent type for a session, from the command line of the first
+# agent process found in it. Prints "agent" when nothing more specific is
+# known.
+find_session_agent_name() {
+    local session="$1"
+    local apid
+
+    apid=$(find_session_agent_pid "$session" 2>/dev/null)
+    if [ -n "$apid" ]; then
+        # The pid lookup above runs in a subshell, so make sure the args
+        # cache exists in this shell before reading it.
+        _build_agent_pid_map
+        local args="${_AP_ARGS[$apid]:-}"
+        case "$args" in
+            *claude*) echo "claude"; return ;;
+            *codex*)  echo "codex"; return ;;
+            *devin*)  echo "devin"; return ;;
+        esac
+    fi
+    echo "agent"
+}

@@ -217,15 +217,11 @@ collect_data() {
     # (ps instead of pgrep: macOS pgrep cannot print the command line, which
     # we need to tell claude/codex/devin apart.)
     local agent_lines
-    agent_lines=$(ps -eo pid=,args= 2>/dev/null | grep -E '(^|[[:space:]/])(claude|codex|devin)([[:space:]]|$)' || true)
+    agent_lines=$(scan_agent_processes)
     if [[ -n "$agent_lines" ]]; then
         _build_pid_map
-        while read -r apid acmd; do
+        while read -r agent_name apid acmd; do
             [ -z "$apid" ] && continue
-            local agent_name="agent"
-            [[ "$acmd" == *claude* ]] && agent_name="claude"
-            [[ "$acmd" == *codex* ]] && agent_name="codex"
-            [[ "$acmd" == *devin* ]] && agent_name="devin"
 
             local pane_pid
             pane_pid=$(find_ancestor_pane "$apid" "$all_pane_pids") || continue
@@ -333,8 +329,11 @@ collect_data() {
             aname="${aname%%:*}"
             local astatus="${ap#*:}"
             astatus="${astatus#*:}"
-            # A session-wide wait snoozes every agent in it.
-            [ "$sstate" = "wait" ] && astatus="wait"
+            # A session-wide wait snoozes every agent in it. Parked panes
+            # stay hidden (matching collect_status_agents in status-line.sh).
+            if [ "$sstate" = "wait" ] && [ "$astatus" != "parked" ]; then
+                astatus="wait"
+            fi
             case "$astatus" in
                 working|wait|done|ask)
                     SUMMARY_AGENTS+=("${aname}:${astatus}")

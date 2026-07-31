@@ -288,8 +288,10 @@ the colour identifies its status:
 | done | green |
 
 For example two Claude agents working alongside a finished Codex agent
-renders as a yellow `✳ ✳` next to a green `⬢`, with the working glyphs
-flipping frames every second. Glyphs and colours are defined in
+renders as two yellow Claude glyphs next to a green `⬢`. Each working
+glyph flips frames every second, staggered by position (`✳ ✻` one second,
+`✻ ✳` the next) so a row of busy agents pulses rather than blinking in
+unison. Glyphs and colours are defined in
 [`scripts/lib/status-summary.sh`](scripts/lib/status-summary.sh) if you want
 different ones.
 

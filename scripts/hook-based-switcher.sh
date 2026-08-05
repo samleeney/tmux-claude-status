@@ -673,6 +673,8 @@ else
 fi
 
 selected=$(emit_rows_for_mode | fzf \
+    --track \
+    --id-nth=2 \
     --ansi \
     --delimiter=$'\t' \
     --with-nth=3.. \

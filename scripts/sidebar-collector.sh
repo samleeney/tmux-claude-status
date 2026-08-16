@@ -14,6 +14,18 @@ CACHE_FILE="$STATUS_DIR/.sidebar-cache"
 PID_FILE="$STATUS_DIR/.sidebar-collector.pid"
 RUN_ONCE=0
 
+# Poll tuning. The loop wakes every TICK_SECONDS to animate the spinner for
+# active sessions, and runs the (much more expensive) collection every
+# TICKS_PER_COLLECT wakeups.
+#
+# Defaults are 1s tick / 5s collect. Override with tmux options:
+#   set -g @agent-tick-seconds 0.25
+#   set -g @agent-ticks-per-collect 4
+TICK_SECONDS=$(tmux show-option -gqv "@agent-tick-seconds" 2>/dev/null)
+[ -z "$TICK_SECONDS" ] && TICK_SECONDS=1
+TICKS_PER_COLLECT=$(tmux show-option -gqv "@agent-ticks-per-collect" 2>/dev/null)
+[ -z "$TICKS_PER_COLLECT" ] && TICKS_PER_COLLECT=5
+
 if [[ "${1:-}" == "--once" ]]; then
     RUN_ONCE=1
 fi
@@ -110,6 +122,6 @@ while true; do
         signal_sidebar_clients USR2 active
     fi
 
-    sleep 0.25
-    tick=$(( (tick + 1) % 4 ))
+    sleep "$TICK_SECONDS"
+    tick=$(( (tick + 1) % TICKS_PER_COLLECT ))
 done

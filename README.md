@@ -339,6 +339,12 @@ set -g @agent-sidebar-width "42"
 # session/window/pane list (default). "agents" is a flat list of every
 # agent pane sorted by status. Toggle mid-session with ctrl-f.
 set -g @agent-switcher-default-mode "tree"  # tree | agents
+
+# Collector poll rate. The daemon wakes every @agent-tick-seconds to animate
+# the spinner and re-collects every @agent-ticks-per-collect wakeups.
+# Lower values are more responsive but cost noticeably more CPU.
+set -g @agent-tick-seconds "1"
+set -g @agent-ticks-per-collect "5"
 ```
 
 `@agent-switcher-style "both"` is the default. It keeps the persistent sidebar and leaves `prefix + S` as the lightweight popup switcher.

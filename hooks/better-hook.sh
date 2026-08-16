@@ -56,10 +56,35 @@ set_status() {
     if [ -n "${TMUX_PANE:-}" ]; then
         local pane_file="$PANE_DIR/${tmux_session}_${TMUX_PANE}.status"
         local agent_file="$PANE_DIR/${tmux_session}_${TMUX_PANE}.agent"
-        echo "$requested_status" > "$pane_file"
-        echo "claude" > "$agent_file"
 
+        # Confirm this pane id still means what it meant when the hook process started, before
+        # writing to it. tmux hands out pane ids from one counter shared by the whole server, not
+        # one per session, so a closed pane's id gets reused by an unrelated pane in an unrelated
+        # session. A hook process that outlives its own pane - a background job with $TMUX_PANE
+        # baked into its environment, or a slow tool call whose completion races a pane closing -
+        # then writes a stale status onto whatever now holds that id. Observed on 2026-08-15: pane
+        # %3 kept receiving "ask" for a pane that had gone back to a plain shell, every 13-15
+        # minutes, for a session with no Claude process anywhere in its tree.
+        #
+        # #{pane_current_command} is "claude" for exactly as long as this hook's own invocations
+        # are meaningful: PreToolUse, Notification, Stop and UserPromptSubmit all fire from
+        # Claude's own process before it hands control to a tool, so the pane's foreground command
+        # is still "claude" at the moment each one runs. Anything else means this id has moved on.
+        if [ "$(tmux display-message -p -t "$TMUX_PANE" '#{pane_current_command}' 2>/dev/null)" = "claude" ]; then
+            echo "$requested_status" > "$pane_file"
+            echo "claude" > "$agent_file"
+        fi
+
+        # Derive the session state from every pane, with `ask` included.
+        #
+        # `ask` was missing here, so a pane blocked on the user contributed nothing and the
+        # session fell through to "done". It outranks the other states deliberately: a session
+        # with one pane waiting on a person and five panes busy still needs a person, and
+        # reporting that as "working" hides the only state the user has to act on. The early
+        # `break` on working is gone for the same reason, since it ended the scan before a
+        # later pane could report `ask`.
         session_status="done"
+        local saw_ask="" saw_working="" saw_wait=""
         local existing_pane_file=""
         for existing_pane_file in "$PANE_DIR/${tmux_session}_"*.status; do
             [ -f "$existing_pane_file" ] || continue
@@ -67,17 +92,19 @@ set_status() {
             local pane_status=""
             pane_status=$(cat "$existing_pane_file" 2>/dev/null || echo "")
             case "$pane_status" in
-                working)
-                    session_status="working"
-                    break
-                    ;;
-                wait)
-                    if [ "$session_status" != "working" ]; then
-                        session_status="wait"
-                    fi
-                    ;;
+                ask)     saw_ask=1 ;;
+                working) saw_working=1 ;;
+                wait)    saw_wait=1 ;;
             esac
         done
+
+        if [ -n "$saw_ask" ]; then
+            session_status="ask"
+        elif [ -n "$saw_working" ]; then
+            session_status="working"
+        elif [ -n "$saw_wait" ]; then
+            session_status="wait"
+        fi
     fi
 
     echo "$session_status" > "$status_file"
@@ -175,8 +202,29 @@ case "$HOOK_TYPE" in
         mark_refresh
         ;;
     Notification)
-        # Claude is waiting for user input.
-        set_status "$TMUX_SESSION" "done"
+        # This event wrote "done", under a comment saying "waiting for user input". Those are
+        # different things, and `ask` - which status-summary.sh and collect.sh already read -
+        # was written by nothing, so a session waiting on permission looked exactly like a
+        # session that had finished.
+        #
+        # Two different notifications arrive on this same event:
+        #   "Claude needs your permission to use Bash"  -> genuinely blocked on the user
+        #   "Claude is waiting for your input"          -> the idle reminder after a normal
+        #                                                  finish, not a new blocker
+        # Marking the second one `ask` would relight every finished session about a minute
+        # after it ended. So branch on the message, and let the idle reminder leave whatever
+        # state the session already had.
+        _msg=$(printf '%s' "$HOOK_JSON" | tr -d '\n' | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+
+        case "$_msg" in
+            *permission*|*Permission*|*approve*|*Approve*|*confirm*|*Confirm*|*"needs your"*)
+                set_status "$TMUX_SESSION" "ask"
+                ;;
+            *)
+                # Idle nag or an unrecognised notification. Do not invent a blocker; leave
+                # the existing state alone rather than overwriting it with "done".
+                ;;
+        esac
         mark_refresh
 
         SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
